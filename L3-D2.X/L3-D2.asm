@@ -155,10 +155,10 @@ ISR_HIGH
 MainMenu_L1		db	"Standby", 0
 MainMenu_L2		db	"1:30PM, 2/3/2014", 0
 Operation_L1	db	"In Operation...", 0
-OpLog_L1		db	"Oprtn. Time: 69s", 0
+OpLog_L1		db	"Oprtn. Time: 89s", 0
 OpLog_L2		db	"12:00PM, 2/3/14"
 OpLogDetails_L1	db	"#: 123 456 789", 0
-OpLogDetails_L2	db	"S: PPP P23 P1N", 0
+OpLogDetails_L2	db	"?: PP1 P23 PNN", 0
 PermLog_L1		db	"Permanent Logs", 0
 PermLog_L2		db	"1  2  3  4", 0
 PermLog1_L1		db	"Permanent Log 1", 0
@@ -176,7 +176,7 @@ PCInter_L2		db	"Connect to PC...", 0
 Init
         clrf		INTCON         ; No interrupts
         clrf		TRISA          ; All port A is output
-        movlw		b'11111111'    ; Set required keypad inputs
+        movlw		b'11110010'    ; Set required keypad inputs
         movwf		TRISB
         clrf		TRISC          ; All port C is output
         clrf		TRISD          ; All port D is output
