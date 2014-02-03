@@ -119,7 +119,7 @@ WR_DATA
 
         return
 
-;WrtLCD: Clock MSB and LSB of W to PORTD<7:4> in two cycles
+; WrtLCD: Clock MSB and LSB of W to PORTD<7:4> in two cycles
 WrtLCD
 	movwf   lcd_tmp ; store original value
 	call    MovMSB  ; move MSB to PORTD

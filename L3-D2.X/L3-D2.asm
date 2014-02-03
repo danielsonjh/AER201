@@ -22,7 +22,14 @@ list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 ; ****************************************************************************
 ; CONSTANT DEFINES
 ; ****************************************************************************
-#define		ArmSol	LATC, 5
+#define     BreakBeam           PORTA, 4
+#define		ArmSol              LATC, 5
+#define     GripSol             LATC, 2
+#define     Step1a              LATA, 0
+#define     Step1b              LATA, 1
+#define     Step2a              LATA, 2
+#define     Step2b              LATA, 3
+#define     StepDelayVal        0xFF
 
 key1		equ		d'0'
 key2		equ		d'1'
@@ -45,6 +52,11 @@ delayReg	equ		0x30
 
 KEY			equ		0x50
 KEY_Temp	equ		0x51
+
+TrayEncoder equ     0x60
+stepDelay1  equ     0x61
+stepDelay2  equ     0x62
+
 
 ; ****************************************************************************
 ; MACROS
@@ -117,8 +129,8 @@ WriteEEPROM macro   word, addrH, addrL
         bcf         EECON1, WREN    ; Diable writes on write complete (EEIF set)
             endm
 
-; Read EEPROM into file
-ReadEEPROM  macro   file, addrH, addrL
+; Read EEPROM into WREG
+ReadEEPROM  macro   addrH, addrL
         movlw       addrH           ; Set high address
         movwf       EEADRH
         movlw       addrL           ; Set low address
@@ -126,7 +138,7 @@ ReadEEPROM  macro   file, addrH, addrL
         bcf         EECON1, EEPGD   ; Point to DATA memory
         bcf         EECON1, CFGS    ; Access EEPROM
         bsf         EECON1, RD      ; EEPROM Read
-        movf        EEDATA, file    ; W - EEDATA
+        movf        EEDATA, WREG    ; W <- EEDATA
             endm
 
 ; Change FSM State
@@ -136,7 +148,7 @@ ChangeState	macro	KeyCode, NextState
 		subwf		KEY
 		bz			Next			; Go to 'NextState'
 		bra			NotNext
-Next								; Before going to the next state,                   ; FIX THIS STUFF LATER WITH CPFSEQ
+Next								; Before going to the next state,                                 ; FIX THIS STUFF LATER WITH CPFSEQ
 		clrf		PORTA			; Clear all Pins
         clrf		PORTB
         clrf		PORTC
@@ -145,6 +157,17 @@ Next								; Before going to the next state,                   ; FIX THIS STUFF
 NotNext
 		movff		KEY_Temp, KEY	; Restore KEY for next check
 			endm
+
+StepMotor   macro
+        call        Step1
+        call        StepDelay
+        call        Step2
+        call        StepDelay
+        call        Step3
+        call        StepDelay
+        call        Step4
+        call        StepDelay
+            endm
 
 ; ****************************************************************************
 ; VECTORS
@@ -186,11 +209,12 @@ PCInter_L2		db	"Connect to PC...", 0
 ; ****************************************************************************
 ; MAIN PROGRAM
 ; ****************************************************************************
-
-        code
+        CODE
 Init
         clrf		INTCON         ; No interrupts
         clrf		TRISA          ; All port A is output
+        movlw       b'00010000'    ; Set RA4 as input
+        movwf       TRISA
         movlw		b'11110010'    ; Set required keypad inputs
         movwf		TRISB
         clrf		TRISC          ; All port C is output
@@ -222,20 +246,35 @@ Operation
 		call LCD_L2
 		DispTable	MainMenu_L2
 
-;CHECK_BEAM
-;        btfss       BreakBeam                   ; Do nothing if beam is set (1)
-;        goto        FOUND_FL                    ; If beam is broken (0)
-;        dcfsnz      tray_encoder                ; Do nothing is tray encoder is not(0)
-;        goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0)
-;        goto        FIND_FL                     ; Else find the next flashlight
-;FIND_FL
-;        call        StepMotor
-;        goto        CHECK_BEAM
-;FOUND_FL
-;
-;NO_MORE_FL
+;        ;TESTING
+;        bsf         ArmSol
+;forever
+;        StepMotor
+;        goto        forever
 
-		bsf			ArmSol						; Turn on Arm Solenoid
+CHECK_BEAM
+        btfss       BreakBeam                   ; Do nothing if beam is set (1)
+        goto        FOUND_FL                    ; If beam is broken (0)
+        dcfsnz      TrayEncoder                 ; Do nothing is tray encoder is not(0)
+        goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0)
+        goto        FIND_FL                     ; Else find the next flashlight
+FIND_FL
+        StepMotor
+        goto        CHECK_BEAM
+FOUND_FL
+        clrf        TrayEncoder                 ; Reset tray encoder since FL was found
+        ; TURN ON LED
+        bsf			ArmSol						; Pull arm down
+        bsf         GripSol                     ; Pull grip in
+        call        TurnGripCW                  ; Turn grip CW
+                    ; take some data somehow lol
+        ; TURN OFF LED
+        call        TurnGripCCW                 ; Turn grip CCW
+        bcf         GripSol                     ; Release grip
+        bcf         ArmSol                      ; Release arm
+NO_MORE_FL
+
+
 Stay_Operation
 		call		ReadKEY						; Wait for key inputs
 		ChangeState	keyStar, Standby			; * for Back (Standby)
@@ -309,6 +348,50 @@ Stay_PCInter
 ; SUBROUTINES
 ; ****************************************************************************
 
+; STEPPER MOTOR SUBROUTINES
+Step1
+        bsf         Step1a
+        bcf         Step1b
+        bcf         Step2a
+        bcf         Step2b
+        return
+Step2
+        bcf         Step1a
+        bcf         Step1b
+        bsf         Step2a
+        bcf         Step2b
+        return
+Step3
+        bcf         Step1a
+        bsf         Step1b
+        bcf         Step2a
+        bcf         Step2b
+        return
+Step4
+        bcf         Step1a
+        bcf         Step1b
+        bcf         Step2a
+        bsf         Step2b
+        return
+StepDelay
+		movlw	StepDelayVal
+		movwf	stepDelay1,0
+		movlw	StepDelayVal
+		movwf	stepDelay2,0
+StepDelayLoop
+		decfsz	stepDelay1, f           ; Delay1 counts down first
+		goto	d2
+		decfsz	stepDelay2, f           ; Delay2 counts down when Delay1 = 0
+d2		goto	StepDelayLoop
+		return
+
+; Turn Gripper Subroutines
+TurnGripCW
+        return
+
+TurnGripCCW
+        return
+
 ; Read Keypad Input
 ReadKEY
 WaitKey
@@ -321,4 +404,4 @@ WaitKey
 		btfsc		PORTB,1     ;Wait until key is released
         goto		$-2			;Back 1 instruction
 		return
-	end
+	END
