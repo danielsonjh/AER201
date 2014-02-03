@@ -1,16 +1,25 @@
 	#include <p18f4620.inc>
-	
-	;Declare unbanked variables (at 0x70 and on)
+
+;Declare unbanked variables (at 0x70 and on)
 	udata
 lcd_tmp	res	1
 lcd_d1	res	1
 lcd_d2	res	1
 
-	;Declare constants for pin assignments (LCD on PORTD)
+;Declare constants for pin assignments (LCD on PORTD)
 RS 	equ 2
 E 	equ 3
 
-	;Helper macros
+#define		LCD_RS      LATD, 2        ; for v 1.0 used PORTD.3
+#define		LCD_E       LATD, 3        ; for v 1.0 used PORTD.2
+
+temp_lcd	EQU     0x20           ; buffer for Instruction
+dat			EQU     0x21           ; buffer for data
+delay1		EQU		0x25
+delay2		EQU		0x26
+delay3		EQU		0x27
+
+;Helper macros
 WRT_LCD macro val
 	movlw   val
 	call    WrtLCD
@@ -23,20 +32,19 @@ LCD_DELAY macro
 	decfsz  lcd_d1,f
 	goto    $-2
 	endm
-	
 
 	code
-	global InitLCD,WrtLCD,ClkLCD,ClrLCD		;Only these functions are visible to other asm files.
-    ;***********************************
-InitLCD
+	global InitLCD,WrtLCD,ClkLCD,ClrLCD,WR_INS,WR_DATA,LCD_L1,LCD_L2		;Only these functions are visible to other asm files.
 
-	;bsf PORTD,E     ;E default high
-	
+; ****************************************************************************
+; GLOBAL SUBROUTINES
+; ****************************************************************************
+InitLCD
+	;bsf PORTD,E     ;E default high	
 	;Wait for LCD POR to finish (~15ms)
 	call lcdLongDelay
 	call lcdLongDelay
 	call lcdLongDelay
-
 	;Ensure 8-bit mode first (no way to immediately guarantee 4-bit mode)
 	; -> Send b'0011' 3 times
     bcf     PORTD,RS       ;Instruction mode
@@ -46,7 +54,6 @@ InitLCD
 	call    ClkLCD         ;Assuming 4-bit mode, set 8-bit mode
 	call    lcdLongDelay   ;->max instruction time ~= 5ms
 	call    ClkLCD         ;(note: if it's in 8-bit mode already, it will stay in 8-bit mode)
-
     ;Now that we know for sure it's in 8-bit mode, set 4-bit mode.
 	movlw B'00100000'
 	call MovMSB
@@ -63,9 +70,56 @@ InitLCD
 	call    ClrLCD
     bsf     PORTD,RS    ;Character mode
 	return
-    ;************************************
 
-	;WrtLCD: Clock MSB and LSB of W to PORTD<7:4> in two cycles
+;****************************************
+;		Write command to LCD
+;		Input  : W
+;		output : -
+;****************************************
+WR_INS
+		bcf		LCD_RS	  				; clear Register Status bit
+		movwf	temp_lcd			; store instruction
+		andlw	0xF0			  	; mask 4 bits MSB
+		movwf	LATD			  	; send 4 bits MSB
+
+		bsf		LCD_E					; pulse enable high
+		swapf	temp_lcd, WREG		; swap nibbles
+		andlw	0xF0			  	; mask 4 bits LSB
+		bcf		LCD_E
+		movwf	LATD			  	; send 4 bits LSB
+		bsf		LCD_E					; pulse enable high
+		bcf		LCD_E
+		call	delay5ms
+
+		return
+
+;***************************************
+;		Write data to LCD
+;		Input  : W
+;		Output : -
+;***************************************
+WR_DATA
+		bcf		LCD_RS					; clear Register Status bit
+        movwf   dat					; store character
+        movf	dat, WREG
+		andlw   0xF0			  	; mask 4 bits MSB
+        addlw   4					; set Register Status
+        movwf   PORTD			  	; send 4 bits MSB
+
+		bsf		LCD_E					; pulse enable high
+        swapf   dat, WREG		  	; swap nibbles
+        andlw   0xF0			  	; mask 4 bits LSB
+		bcf		LCD_E
+        addlw   4					; set Register Status
+        movwf   PORTD			  	; send 4 bits LSB
+		bsf		LCD_E					; pulse enable high
+		bcf		LCD_E
+
+		call	delay44us
+
+        return
+
+;WrtLCD: Clock MSB and LSB of W to PORTD<7:4> in two cycles
 WrtLCD
 	movwf   lcd_tmp ; store original value
 	call    MovMSB  ; move MSB to PORTD
@@ -76,14 +130,14 @@ WrtLCD
 
     return
 
-    ;ClrLCD: Clear the LCD display
+; ClrLCD: Clear the LCD display
 ClrLCD
     bcf     PORTD,RS       ;Instruction mode
     WRT_LCD b'00000001'
     call    lcdLongDelay
     return
 
-    ;ClkLCD: Pulse the E line low
+; ClkLCD: Pulse the E line low
 ClkLCD
     ;LCD_DELAY
     bsf PORTD,E
@@ -93,9 +147,22 @@ ClkLCD
 	LCD_DELAY
     return
 
-    ;****************************************
+; Change LCD Lines
+LCD_L1
+		movlw		B'10000000'
+		call		WR_INS
+		return
+LCD_L2
+		movlw		B'11000000'
+		call		WR_INS
+		return
 
-    ;MovMSB: Move MSB of W to PORTD, without disturbing LSB
+
+
+; ****************************************************************************
+; EXTRA HELPER SUBROUTINES
+; ****************************************************************************
+;MovMSB: Move MSB of W to PORTD, without disturbing LSB
 MovMSB
     andlw 0xF0
     iorwf PORTD,f
@@ -112,5 +179,32 @@ LLD_LOOP
     decfsz lcd_d2,f
     goto LLD_LOOP
     return
-    
+
+;******************************************************************************
+; Delay44us (): wait exactly  110 cycles (44 us)
+; <www.piclist.org>
+
+delay44us
+		movlw	0x23
+		movwf	delay1, 0
+
+Delay44usLoop
+
+		decfsz	delay1, f
+		goto	Delay44usLoop
+		return
+
+delay5ms
+		movlw	0xC2
+		movwf	delay1,0
+		movlw	0x0A
+		movwf	delay2,0
+
+Delay5msLoop
+		decfsz	delay1, f
+		goto	d2
+		decfsz	delay2, f
+d2		goto	Delay5msLoop
+		return
+
     end

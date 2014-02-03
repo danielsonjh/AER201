@@ -22,8 +22,6 @@ list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 ; ****************************************************************************
 ; CONSTANT DEFINES
 ; ****************************************************************************
-#define		RS      LATD, 2        ; for v 1.0 used PORTD.3
-#define		E       LATD, 3        ; for v 1.0 used PORTD.2
 #define		ArmSol	LATC, 5
 
 key1		equ		d'0'
@@ -42,12 +40,6 @@ keyStar		equ		d'12'
 key0		equ		d'13'
 keyHash		equ		d'14'
 keyD		equ		d'15'
-
-temp_lcd	EQU     0x20           ; buffer for Instruction
-dat			EQU     0x21           ; buffer for data
-delay1		EQU		0x25
-delay2		EQU		0x26
-delay3		EQU		0x27
 
 delayReg	equ		0x30
 
@@ -102,15 +94,40 @@ Again
 	bnz		Again			; Keep going until the end (0 byte)
 			endm
 
-; Change LCD Lines
-LCD_L1		macro
-		movlw		B'10000000'
-		call		WR_INS
-			endm
-LCD_L2		macro
-		movlw		B'11000000'
-		call		WR_INS
-			endm
+; Write word to EEPROM
+WriteEEPROM macro   word, addrH, addrL
+        movlw       addrH           ; Set high address
+        movwf       EEADRH
+        movlw       addrL           ; Set low address
+        movwf       EEADR
+        movlw       word            ; Set word data
+        movwf       EEDATA
+        bcf         EECON1, EPGD    ; Point to DATA memory
+        bcf         EECON1, CFGS    ; Access EEPROM
+        bsf         EECON1, WREN    ; Enable writes
+
+        bcf         INTCON, GIE     ; Disable interrupts
+        movlw       55h
+        movwf       EECON2          ; Write 55h
+        movlw       0xAA            ;
+        movwf       EECON2          ; Write 0xAA
+        bsf         EECON1, WR      ; Set WR bit to begin write
+        bsf         INTCON, GIE     ; Enable interrupts
+
+        bcf         EECON1, WREN    ; Diable writes on write complete (EEIF set)
+            endm
+
+; Read EEPROM into file
+ReadEEPROM  macro   file, addrH, addrL
+        movlw       addrH           ; Set high address
+        movwf       EEADRH
+        movlw       addrL           ; Set low address
+        movwf       EEADR
+        bcf         EECON1, EEPGD   ; Point to DATA memory
+        bcf         EECON1, CFGS    ; Access EEPROM
+        bsf         EECON1, RD      ; EEPROM Read
+        movf        EEDATA, file    ; W - EEDATA
+            endm
 
 ; Change FSM State
 ChangeState	macro	KeyCode, NextState
@@ -119,7 +136,7 @@ ChangeState	macro	KeyCode, NextState
 		subwf		KEY
 		bz			Next			; Go to 'NextState'
 		bra			NotNext
-Next								; Before going to the next state,
+Next								; Before going to the next state,                   ; FIX THIS STUFF LATER WITH CPFSEQ
 		clrf		PORTA			; Clear all Pins
         clrf		PORTB
         clrf		PORTC
@@ -166,8 +183,6 @@ PCInter_L1		db	"PC Interface", 0
 PCInter_L2		db	"Connect to PC...", 0
 
 
-
-
 ; ****************************************************************************
 ; MAIN PROGRAM
 ; ****************************************************************************
@@ -188,9 +203,9 @@ Init
 
 ; STANDBY STATE
 Standby
-		call		ClearLCD
+		call		ClrLCD
 		DispTable	MainMenu_L1
-		LCD_L2
+		call LCD_L2
 		DispTable	MainMenu_L2
 Stay_Standby
 		call		ReadKEY						; Wait for key inputs
@@ -202,10 +217,24 @@ Stay_Standby
 
 ; OPERATION STATE
 Operation
-		call		ClearLCD
+		call		ClrLCD
 		DispTable	Operation_L1
-		LCD_L2
+		call LCD_L2
 		DispTable	MainMenu_L2
+
+;CHECK_BEAM
+;        btfss       BreakBeam                   ; Do nothing if beam is set (1)
+;        goto        FOUND_FL                    ; If beam is broken (0)
+;        dcfsnz      tray_encoder                ; Do nothing is tray encoder is not(0)
+;        goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0)
+;        goto        FIND_FL                     ; Else find the next flashlight
+;FIND_FL
+;        call        StepMotor
+;        goto        CHECK_BEAM
+;FOUND_FL
+;
+;NO_MORE_FL
+
 		bsf			ArmSol						; Turn on Arm Solenoid
 Stay_Operation
 		call		ReadKEY						; Wait for key inputs
@@ -214,9 +243,9 @@ Stay_Operation
 
 ; OPERATION LOG STATE
 OpLog
-		call		ClearLCD
+		call		ClrLCD
 		DispTable	OpLog_L1
-		LCD_L2
+		call LCD_L2
 		DispTable	OpLog_L2
 Stay_OpLog
 		call		ReadKEY
@@ -224,9 +253,9 @@ Stay_OpLog
 		ChangeState keyStar, Standby
 		bra			Stay_OpLog
 OpLogDetails
-		call		ClearLCD
+		call		ClrLCD
 		DispTable	OpLogDetails_L1
-		LCD_L2
+		call LCD_L2
 		DispTable	OpLogDetails_L2
 StayOpLogDetails
 		call		ReadKEY
@@ -235,9 +264,9 @@ StayOpLogDetails
 
 ; PERMANENT LOG STATE
 PermLogMenu
-		call		ClearLCD
+		call		ClrLCD
 		DispTable	PermLog_L1
-		LCD_L2
+		call LCD_L2
 		DispTable	PermLog_L2
 Stay_PermLogMenu
 		call		ReadKEY
@@ -245,9 +274,9 @@ Stay_PermLogMenu
 		ChangeState keyStar, Standby
 		bra			Stay_PermLogMenu
 PermLog1
-		call		ClearLCD
+		call		ClrLCD
 		DispTable	PermLog1_L1
-		LCD_L2
+		call LCD_L2
 		DispTable	OpLog_L2
 Stay_PermLog1
 		call		ReadKEY
@@ -255,9 +284,9 @@ Stay_PermLog1
 		ChangeState keyStar, PermLogMenu
 		bra			Stay_PermLog1
 PermLog1Details
-		call		ClearLCD
+		call		ClrLCD
 		DispTable	OpLogDetails_L1
-		LCD_L2
+		call LCD_L2
 		DispTable	OpLogDetails_L2
 Stay_PermLog1Details
 		call		ReadKEY
@@ -266,9 +295,9 @@ Stay_PermLog1Details
 
 ; PC INTERFACE STATE
 PCInter
-	call ClearLCD
+	call ClrLCD
 	DispTable	PCInter_L1
-	LCD_L2
+	call LCD_L2
 	DispTable	PCInter_L2
 Stay_PCInter
 	call		ReadKEY
@@ -279,64 +308,6 @@ Stay_PCInter
 ; ****************************************************************************
 ; SUBROUTINES
 ; ****************************************************************************
-
-;****************************************
-;		Write command to LCD
-;		Input  : W
-;		output : -
-;****************************************
-WR_INS
-		bcf		RS	  				; clear Register Status bit
-		movwf	temp_lcd			; store instruction
-		andlw	0xF0			  	; mask 4 bits MSB
-		movwf	LATD			  	; send 4 bits MSB
-
-		bsf		E					; pulse enable high
-		swapf	temp_lcd, WREG		; swap nibbles
-		andlw	0xF0			  	; mask 4 bits LSB
-		bcf		E
-		movwf	LATD			  	; send 4 bits LSB
-		bsf		E					; pulse enable high
-		bcf		E
-		call	delay5ms
-
-		return
-
-;***************************************
-;		Write data to LCD
-;		Input  : W
-;		Output : -
-;***************************************
-WR_DATA
-		bcf		RS					; clear Register Status bit
-        movwf   dat					; store character
-        movf	dat, WREG
-		andlw   0xF0			  	; mask 4 bits MSB
-        addlw   4					; set Register Status
-        movwf   PORTD			  	; send 4 bits MSB
-
-		bsf		E					; pulse enable high
-        swapf   dat, WREG		  	; swap nibbles
-        andlw   0xF0			  	; mask 4 bits LSB
-		bcf		E
-        addlw   4					; set Register Status
-        movwf   PORTD			  	; send 4 bits LSB
-		bsf		E					; pulse enable high
-		bcf		E
-
-		call	delay44us
-
-        return
-
-ClearLCD
-		movlw	B'00000001'
-		call	WR_INS
-		return
-
-SwitchLineLCD
-		movlw	B'11000000'
-		call	WR_INS
-		return
 
 ; Read Keypad Input
 ReadKEY
@@ -349,32 +320,5 @@ WaitKey
 		movwf		KEY_Temp
 		btfsc		PORTB,1     ;Wait until key is released
         goto		$-2			;Back 1 instruction
-		return
-
-;******************************************************************************
-; Delay44us (): wait exactly  110 cycles (44 us)
-; <www.piclist.org>
-
-delay44us
-		movlw	0x23
-		movwf	delay1, 0
-
-Delay44usLoop
-
-		decfsz	delay1, f
-		goto	Delay44usLoop
-		return
-
-delay5ms
-		movlw	0xC2
-		movwf	delay1,0
-		movlw	0x0A
-		movwf	delay2,0
-
-Delay5msLoop
-		decfsz	delay1, f
-		goto	d2
-		decfsz	delay2, f
-d2		goto	Delay5msLoop
 		return
 	end
