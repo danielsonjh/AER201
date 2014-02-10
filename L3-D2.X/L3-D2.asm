@@ -23,13 +23,16 @@ list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 ; CONSTANT DEFINES
 ; ****************************************************************************
 #define     BreakBeam           PORTA, 4
+#define     Photo1              PORTE, 0
+#define     Photo2              PORTE, 1
+#define     Photo3              PORTE, 2
 #define		ArmSol              LATC, 5
 #define     GripSol             LATC, 2
 #define     Step1a              LATA, 0
 #define     Step1b              LATA, 1
 #define     Step2a              LATA, 2
 #define     Step2b              LATA, 3
-#define     StepDelayVal        0x1F
+#define     StepDelayVal        0x0F                                                                    ; EDIT FOR STEP DELAY
 
 key1		equ		d'0'
 key2		equ		d'1'
@@ -61,6 +64,12 @@ InOperation equ     0x60
 TrayEncoder equ     0x61
 stepDelay1  equ     0x62
 stepDelay2  equ     0x63
+FL_count    equ     0x64
+
+PhotoInput  equ     0x70
+
+EEPROM_H    equ     0x80
+EEPROM_L    equ     0x81
 
 
 ; ****************************************************************************
@@ -119,7 +128,7 @@ WriteEEPROM macro   word, addrH, addrL
         movwf       EEADR
         movlw       word            ; Set word data
         movwf       EEDATA
-        bcf         EECON1, EPGD    ; Point to DATA memory
+        bcf         EECON1, EEPGD   ; Point to DATA memory                                                      ; ADDED AN E
         bcf         EECON1, CFGS    ; Access EEPROM
         bsf         EECON1, WREN    ; Enable writes
 
@@ -193,7 +202,6 @@ StepMotor   macro
 
 ISR_HIGH
     saveContext
-    bsf     ArmSol                                                                                       ; TESTING
     btfss   INTCON3, INT1IF        ; If KEYPAD interrupt, skip return
     goto    END_ISR_HIGH
 
@@ -239,10 +247,15 @@ PCInter_L2		db	"Connect to PC...", 0
 ; ****************************************************************************
         CODE
 Init
-        clrf		INTCON         ; No interrupts
-        clrf		TRISA          ; All port A is output
-        movlw       b'00010000'    ; Set RA4 as input
+        ;clrf		INTCON         ; No interrupts
+        ;clrf		TRISA          ; All port A is output
+
+        movlw       b'00010000'    ; Set PORTA4 as input
         movwf       TRISA
+
+        movlw       b'00000111'         ; Set PORTE<0:2> as input
+        movwf       TRISE
+
         movlw		b'11111111'    ; Set required keypad inputs (RB0 is interrupt)
         movwf		TRISB
         clrf		TRISC          ; All port C is output
@@ -280,40 +293,65 @@ Operation
 		DispTable	Operation_L1
 		call LCD_L2
 		DispTable	MainMenu_L2
+        clrf        FL_count                    ; Clear FL_count to 0
 
         ;TESTING
-        ;bsf         ArmSol
-forever
-        StepMotor
-        goto        forever
-;
-;CHECK_BEAM
-;        btfss       BreakBeam                   ; Do nothing if beam is set (1)
-;        goto        FOUND_FL                    ; If beam is broken (0)
-;        dcfsnz      TrayEncoder                 ; Do nothing is tray encoder is not(0)
-;        goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0)
-;        goto        FIND_FL                     ; Else find the next flashlight
-;FIND_FL
+;        bsf         ArmSol
+;forever
 ;        StepMotor
-;        goto        CHECK_BEAM
-;FOUND_FL
-;        clrf        TrayEncoder                 ; Reset tray encoder since FL was found
-;        ; TURN ON LED
-;        bsf			ArmSol						; Pull arm down
-;        bsf         GripSol                     ; Pull grip in
-;        call        TurnGripCW                  ; Turn grip CW
-;                    ; take some data somehow lol
-;        ; TURN OFF LED
-;        call        TurnGripCCW                 ; Turn grip CCW
-;        bcf         GripSol                     ; Release grip
-;        bcf         ArmSol                      ; Release arm
-;NO_MORE_FL
-;
-;
-;Stay_Operation
-;		call		ReadKEY						; Wait for key inputs
-;		ChangeState	keyStar, Standby			; * for Back (Standby)
-;		bra			Stay_Operation
+;        goto        forever
+
+FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
+        btfss       BreakBeam
+        goto        FIND_FL
+        ; Step Motor 1 degree
+        goto        FIND_FIRST_FL
+
+FIND_FL
+        btfss       BreakBeam                   ; Do nothing if beam is not broken (1)
+        goto        FOUND_FL                    ; If beam is broken (0) go to FOUND_FL
+        dcfsnz      TrayEncoder                 ; Do nothing is tray encoder is not(0)
+        goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0) go to NO_MORE_FL
+        ; Step Motor 1 degree
+        goto        FIND_FL
+
+FOUND_FL
+        clrf        TrayEncoder                 ; Reset tray encoder since FL was found
+        movlw       1
+        addwf       FL_count                    ; Increment FL_count
+        ; TURN ON LED
+        bsf			ArmSol						; Pull arm down
+        bsf         GripSol                     ; Pull grip in
+        call        TurnGripCW                  ; Turn grip CW
+        ; TAKE DATA FROM PHOTO SENSORS
+        call        PhotoData
+        ; TURN OFF LED
+        call        TurnGripCCW                 ; Turn grip CCW
+        bcf         GripSol                     ; Release grip
+        bcf         ArmSol                      ; Release arm
+        ; CHECK EXIT CONDITIONS
+        movlw       9                           ; Don't exit if under 9 count
+        cpfslt      FL_count
+        goto        EXIT_OP                     ; Exit if FL_count is 9
+        ; Step motor 20 degrees
+        goto        FIND_FL                     ; Keep looking for FL if under 9 count
+
+NO_MORE_FL
+        movlw       1                           ; Increment FL_count
+        addwf       FL_count
+        call        NoPhotoData
+        movlw       9                           ; Don't exit if under 9 count
+        cpfslt      FL_count
+        goto        EXIT_OP                     ; Exit if FL_count is 9
+
+EXIT_OP
+        ;Stop Timer
+        goto        OpLog
+
+Stay_Operation
+		call		ReadKEY						; Wait for key inputs
+		ChangeState	keyStar, Standby			; * for Back (Standby)
+		bra			Stay_Operation
 
 ; OPERATION LOG STATE
 OpLog
@@ -382,6 +420,24 @@ Stay_PCInter
 ; ****************************************************************************
 ; SUBROUTINES
 ; ****************************************************************************
+
+; DATA SUBROUTINES
+PhotoData                                       ; CALLED FROM FOUND_FL
+        movff       PORTE, PhotoInput           ; Take input from photo sensors
+        bsf         PhotoInput, 3               ; Set 1 for break beam since FL was found
+        movlw       b'00001111'
+        andwf       PhotoInput
+        WriteEEPROM PhotoInput, EEPROM_H, EEPROM_L
+        movlw       1                           ; Increment EEPROM_L for next data
+        addwf       EEPROM_L
+        return
+
+NoPhotoData
+        clrf        PhotoInput
+        WriteEEPROM PhotoInput, EEPROM_H, EEPROM_L
+        movlw       1
+        addwf       EEPROM_L
+        return
 
 ; STEPPER MOTOR SUBROUTINES
 Step1
