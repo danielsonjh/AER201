@@ -29,7 +29,7 @@ list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 #define     Step1b              LATA, 1
 #define     Step2a              LATA, 2
 #define     Step2b              LATA, 3
-#define     StepDelayVal        0xFF
+#define     StepDelayVal        0x1F
 
 key1		equ		d'0'
 key2		equ		d'1'
@@ -48,14 +48,19 @@ key0		equ		d'13'
 keyHash		equ		d'14'
 keyD		equ		d'15'
 
+STATUS_TEMP equ     0x00
+W_TEMP      equ     0x01
+
 delayReg	equ		0x30
 
 KEY			equ		0x50
 KEY_Temp	equ		0x51
+KEY_ISR     equ     0x52
 
-TrayEncoder equ     0x60
-stepDelay1  equ     0x61
-stepDelay2  equ     0x62
+InOperation equ     0x60
+TrayEncoder equ     0x61
+stepDelay1  equ     0x62
+stepDelay2  equ     0x63
 
 
 ; ****************************************************************************
@@ -153,6 +158,7 @@ Next								; Before going to the next state,                                 ; 
         clrf		PORTB
         clrf		PORTC
         clrf		PORTD
+        clrf        InOperation     ; Not in operation anymore
 		goto		NextState
 NotNext
 		movff		KEY_Temp, KEY	; Restore KEY for next check
@@ -186,6 +192,29 @@ StepMotor   macro
 ; ****************************************************************************
 
 ISR_HIGH
+    saveContext
+    bsf     ArmSol                                                                                       ; TESTING
+    btfss   INTCON3, INT1IF        ; If KEYPAD interrupt, skip return
+    goto    END_ISR_HIGH
+
+    movlw   0xFF                ; If in operation, skip return
+    cpfseq  InOperation
+    goto    END_ISR_HIGH
+
+    swapf   PORTB, W            ; Read PORTB<7:4> into W<3:0>
+    andlw   0x0F
+    movwf   KEY_ISR            ; Put W into KEY_ISR
+    movlw   keyStar             ; Put keyStar into W to compare to KEY_ISR
+    cpfseq  KEY_ISR            ; If key was '*', skip return
+    goto    END_ISR_HIGH
+
+    clrf    TOSU                   ; Reset program counter
+    clrf    TOSH
+    clrf    TOSL
+
+END_ISR_HIGH
+    bcf     INTCON3, INT1IF        ; Clear flag for next interrupt
+    restContext
 	retfie
 
 ; ****************************************************************************
@@ -205,7 +234,6 @@ PermLog1_L1		db	"Permanent Log 1", 0
 PCInter_L1		db	"PC Interface", 0
 PCInter_L2		db	"Connect to PC...", 0
 
-
 ; ****************************************************************************
 ; MAIN PROGRAM
 ; ****************************************************************************
@@ -215,7 +243,7 @@ Init
         clrf		TRISA          ; All port A is output
         movlw       b'00010000'    ; Set RA4 as input
         movwf       TRISA
-        movlw		b'11110010'    ; Set required keypad inputs
+        movlw		b'11111111'    ; Set required keypad inputs (RB0 is interrupt)
         movwf		TRISB
         clrf		TRISC          ; All port C is output
         clrf		TRISD          ; All port D is output
@@ -224,6 +252,12 @@ Init
         clrf		LATC
         clrf		LATD
 		call		InitLCD
+
+        bcf         RCON, IPEN          ; Legacy mode interrupts
+        bsf         INTCON, GIE         ; Allow global interrupt
+        bsf         INTCON3, INT1IE     ; enable INT0 int flag bit on RB0
+        bsf         INTCON2, INTEDG1    ; set INTEDG0 to detect rising edge
+
 
 ; STANDBY STATE
 Standby
@@ -241,44 +275,45 @@ Stay_Standby
 
 ; OPERATION STATE
 Operation
+        setf        InOperation
 		call		ClrLCD
 		DispTable	Operation_L1
 		call LCD_L2
 		DispTable	MainMenu_L2
 
-;        ;TESTING
-;        bsf         ArmSol
-;forever
-;        StepMotor
-;        goto        forever
-
-CHECK_BEAM
-        btfss       BreakBeam                   ; Do nothing if beam is set (1)
-        goto        FOUND_FL                    ; If beam is broken (0)
-        dcfsnz      TrayEncoder                 ; Do nothing is tray encoder is not(0)
-        goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0)
-        goto        FIND_FL                     ; Else find the next flashlight
-FIND_FL
+        ;TESTING
+        ;bsf         ArmSol
+forever
         StepMotor
-        goto        CHECK_BEAM
-FOUND_FL
-        clrf        TrayEncoder                 ; Reset tray encoder since FL was found
-        ; TURN ON LED
-        bsf			ArmSol						; Pull arm down
-        bsf         GripSol                     ; Pull grip in
-        call        TurnGripCW                  ; Turn grip CW
-                    ; take some data somehow lol
-        ; TURN OFF LED
-        call        TurnGripCCW                 ; Turn grip CCW
-        bcf         GripSol                     ; Release grip
-        bcf         ArmSol                      ; Release arm
-NO_MORE_FL
-
-
-Stay_Operation
-		call		ReadKEY						; Wait for key inputs
-		ChangeState	keyStar, Standby			; * for Back (Standby)
-		bra			Stay_Operation
+        goto        forever
+;
+;CHECK_BEAM
+;        btfss       BreakBeam                   ; Do nothing if beam is set (1)
+;        goto        FOUND_FL                    ; If beam is broken (0)
+;        dcfsnz      TrayEncoder                 ; Do nothing is tray encoder is not(0)
+;        goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0)
+;        goto        FIND_FL                     ; Else find the next flashlight
+;FIND_FL
+;        StepMotor
+;        goto        CHECK_BEAM
+;FOUND_FL
+;        clrf        TrayEncoder                 ; Reset tray encoder since FL was found
+;        ; TURN ON LED
+;        bsf			ArmSol						; Pull arm down
+;        bsf         GripSol                     ; Pull grip in
+;        call        TurnGripCW                  ; Turn grip CW
+;                    ; take some data somehow lol
+;        ; TURN OFF LED
+;        call        TurnGripCCW                 ; Turn grip CCW
+;        bcf         GripSol                     ; Release grip
+;        bcf         ArmSol                      ; Release arm
+;NO_MORE_FL
+;
+;
+;Stay_Operation
+;		call		ReadKEY						; Wait for key inputs
+;		ChangeState	keyStar, Standby			; * for Back (Standby)
+;		bra			Stay_Operation
 
 ; OPERATION LOG STATE
 OpLog
