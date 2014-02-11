@@ -22,7 +22,7 @@ list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 ; ****************************************************************************
 ; CONSTANT DEFINES
 ; ****************************************************************************
-#define     BreakBeam           PORTA, 4
+#define     BreakBeam           PORTA, 5
 #define     Photo1              PORTE, 0
 #define     Photo2              PORTE, 1
 #define     Photo3              PORTE, 2
@@ -32,7 +32,7 @@ list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 #define     Step1b              LATA, 1
 #define     Step2a              LATA, 2
 #define     Step2b              LATA, 3
-#define     StepDelayVal        0x0F                                                                    ; EDIT FOR STEP DELAY
+#define     StepDelayVal        0x3F                                                                    ; EDIT FOR STEP DELAY
 
 key1		equ		d'0'
 key2		equ		d'1'
@@ -126,7 +126,7 @@ WriteEEPROM macro   word, addrH, addrL
         movwf       EEADRH
         movlw       addrL           ; Set low address
         movwf       EEADR
-        movlw       word            ; Set word data
+        movf        word, W         ; Set word data
         movwf       EEDATA
         bcf         EECON1, EEPGD   ; Point to DATA memory                                                      ; ADDED AN E
         bcf         EECON1, CFGS    ; Access EEPROM
@@ -157,7 +157,7 @@ ReadEEPROM  macro   addrH, addrL
 
 ; Change FSM State
 ChangeState	macro	KeyCode, NextState
-		local		Next, NotNext	; Need this to bypass 'out of range' error
+		local		Next, NotNext																		; Need this to bypass 'out of range' error
 		movlw		KeyCode			; If 'KeyCode' was pressed
 		subwf		KEY
 		bz			Next			; Go to 'NextState'
@@ -271,6 +271,11 @@ Init
         bsf         INTCON3, INT1IE     ; enable INT0 int flag bit on RB0
         bsf         INTCON2, INTEDG1    ; set INTEDG0 to detect rising edge
 
+		clrf		EEPROM_H
+		clrf		EEPROM_L
+		clrf		FL_count
+		clrf		TrayEncoder
+
 
 ; STANDBY STATE
 Standby
@@ -304,7 +309,7 @@ Operation
 FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
         btfss       BreakBeam
         goto        FIND_FL
-        ; Step Motor 1 degree
+			; Step Motor 1 degree
         goto        FIND_FIRST_FL
 
 FIND_FL
@@ -312,7 +317,7 @@ FIND_FL
         goto        FOUND_FL                    ; If beam is broken (0) go to FOUND_FL
         dcfsnz      TrayEncoder                 ; Do nothing is tray encoder is not(0)
         goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0) go to NO_MORE_FL
-        ; Step Motor 1 degree
+			; Step Motor 1 degree
         goto        FIND_FL
 
 FOUND_FL
@@ -333,19 +338,19 @@ FOUND_FL
         movlw       9                           ; Don't exit if under 9 count
         cpfslt      FL_count
         goto        EXIT_OP                     ; Exit if FL_count is 9
-        ; Step motor 20 degrees
+			; Step motor 20 degrees
         goto        FIND_FL                     ; Keep looking for FL if under 9 count
 
 NO_MORE_FL
         movlw       1                           ; Increment FL_count
         addwf       FL_count
-        call        NoPhotoData
+        call        NoPhotoData					; Take data for N/A FL
         movlw       9                           ; Don't exit if under 9 count
         cpfslt      FL_count
         goto        EXIT_OP                     ; Exit if FL_count is 9
 
 EXIT_OP
-        ;Stop Timer
+			;Stop Timer
         goto        OpLog
 
 Stay_Operation
