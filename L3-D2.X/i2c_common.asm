@@ -21,7 +21,7 @@
 ;I2C lowest layer macros;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 i2c_common_check_ack	macro	err_address		;If bad ACK bit received, goto err_address
-	banksel		SSPCON2
+	;banksel		SSPCON2
     btfsc       SSPCON2,ACKSTAT
     goto        err_address
 	endm
@@ -30,7 +30,7 @@ i2c_common_start	macro
 ;input:		none
 ;output:	none
 ;desc:		initiate start conditionon the bus
-	banksel     SSPCON2
+	;banksel     SSPCON2
     bsf         SSPCON2,SEN
     btfsc       SSPCON2,SEN
     goto        $-2
@@ -40,7 +40,7 @@ i2c_common_stop	macro
 ;input: 	none
 ;output:	none
 ;desc:		initiate stop condition on the bus
-	banksel     SSPCON2
+	;banksel     SSPCON2
     bsf         SSPCON2,PEN
     btfsc       SSPCON2,PEN
     goto        $-2
@@ -51,7 +51,7 @@ i2c_common_repeatedstart	macro
 ;output:	none
 ;desc:		initiate repeated start on the bus. Usually used for
 ;			changing direction of SDA without STOP event
-	banksel     SSPCON2
+	;banksel     SSPCON2
     bsf         SSPCON2,RSEN
     btfsc       SSPCON2,RSEN
     goto        $-2
@@ -61,7 +61,7 @@ i2c_common_ack		macro
 ;input:		none
 ;output:	none
 ;desc:		send an acknowledge to slave device
-    banksel     SSPCON2
+    ;banksel     SSPCON2
     bcf         SSPCON2,ACKDT
     bsf         SSPCON2,ACKEN
     btfsc       SSPCON2,ACKEN
@@ -72,7 +72,7 @@ i2c_common_nack	macro
 ;input:		none
 ;output:	none
 ;desc:		send an not acknowledge to slave device
-   banksel     SSPCON2
+   ;banksel     SSPCON2
    bsf         SSPCON2,ACKDT
    bsf         SSPCON2,ACKEN
    btfsc       SSPCON2,ACKEN
@@ -84,23 +84,23 @@ i2c_common_write	macro
 ;output:	to slave device
 ;desc:		writes W to SSPBUF and send to slave device. Make sure
 ;			transmit is finished before continuing
-   banksel     SSPBUF
+   ;banksel     SSPBUF
    movwf       SSPBUF
-   banksel     SSPSTAT
+   ;banksel     SSPSTAT
    btfsc       SSPSTAT,R_W 		;While transmit is in progress, wait
    goto        $-2
-   banksel     SSPCON2
+   ;banksel     SSPCON2
    endm
 
 i2c_common_read	macro
 ;input:		none
 ;output:	W
 ;desc:		reads data from slave and saves it in W.
-   banksel     SSPCON2
+   ;banksel     SSPCON2
    bsf         SSPCON2,RCEN    ;Begin receiving byte from
    btfsc       SSPCON2,RCEN
    goto        $-2
-   banksel     SSPBUF
+   ;banksel     SSPBUF
    movf        SSPBUF,w
    endm
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -111,14 +111,14 @@ i2c_common_setup
 ;input:		none
 ;output:	none
 ;desc:		sets up I2C as master device with 100kHz baud rate
-	banksel		SSPSTAT
+	;banksel		SSPSTAT
     clrf        SSPSTAT         ;I2C line levels, and clear all flags
     movlw       d'24'         	;100kHz baud rate: 10MHz osc / [4*(24+1)]
-	banksel		SSPADD
+	;banksel		SSPADD
     movwf       SSPADD          ;RTC only supports 100kHz
 
     movlw       b'00001000'     ;Config SSP for Master Mode I2C
-	banksel		SSPCON1
+	;banksel		SSPCON1
     movwf       SSPCON1
     bsf         SSPCON1,SSPEN    ;Enable SSP module
     i2c_common_stop        		;Ensure the bus is free
@@ -137,13 +137,13 @@ write_rtc
         i2c_common_check_ack   WR_ERR
 
         ;Write data to I2C bus (Register Address in RTC)
-		banksel		0x73
+		;banksel		0x73
         movf        0x73,w       ;Set register pointer in RTC
         i2c_common_write
         i2c_common_check_ack   WR_ERR
 
         ;Write data to I2C bus (Data to be placed in RTC register)
-		banksel		0x74
+		;banksel		0x74
         movf        0x74,w       ;Write data to register in RTC
         i2c_common_write
         i2c_common_check_ack   WR_ERR
@@ -166,7 +166,7 @@ read_rtc
         i2c_common_check_ack   RD_ERR
 
         ;Write data to I2C bus (Register Address in RTC)
-		banksel		0x73
+		;banksel		0x73
         movf        0x73,w       ;Set register pointer in RTC
         i2c_common_write
         i2c_common_check_ack   RD_ERR
@@ -179,7 +179,7 @@ read_rtc
 
         ;Read data from I2C bus (Contents of Register in RTC)
         i2c_common_read
-		banksel		0x75
+		;banksel		0x75
         movwf       0x75
         i2c_common_nack      ;Send acknowledgement of data reception
         
@@ -199,14 +199,14 @@ rtc_convert
 ;			in W into a two digit ASCII number and place
 ;			each digit into the corresponding registers
 ;			dig10 or dig1
-	banksel	0x76
+	;banksel	0x76
 	movwf   0x76             ; B1 = HHHH LLLL
     swapf   0x76,w           ; W  = LLLL HHHH
     andlw   0x0f           ; Mask upper four bits 0000 HHHH
     addlw   0x30           ; convert to ASCII
     movwf	0x77		   ;saves into 10ths digit
 
-	banksel	0x76
+	;banksel	0x76
     movf    0x76,w
     andlw   0x0f           ; w  = 0000 LLLL
     addlw   0x30           ; convert to ASCII		
@@ -223,7 +223,7 @@ p2p_write
         i2c_common_write
         i2c_common_check_ack   W_END 
 
-		banksel	0x70
+		;banksel	0x70
 		movf	0x70, W
         i2c_common_write
         i2c_common_check_ack   W_END 
@@ -241,7 +241,7 @@ p2p_read
 		i2c_common_check_ack   R_END
 
         i2c_common_read
-		banksel		0x70
+		;banksel		0x70
         movwf       0x70
         i2c_common_nack      ;Send acknowledgement of data reception
 R_END

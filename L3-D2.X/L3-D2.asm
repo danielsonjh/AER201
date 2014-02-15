@@ -54,6 +54,7 @@ keyD		equ		d'15'
 
 STATUS_TEMP equ     0x00
 W_TEMP      equ     0x01
+Counter		equ		0x02
 
 ; 0x20 to 0x27 for LCD
 
@@ -72,6 +73,7 @@ PhotoInput  equ     0x65
 
 ; 0x71 to 0x78 for RTC
 
+EEPROM_CLEAR	equ	0x79
 EEPROM_H    equ     0x80
 EEPROM_L    equ     0x81
 EEPROM_REG	equ		0x82
@@ -141,6 +143,13 @@ Again
 DispOpLog	macro	addrH, addrL
 		local		Again, P, OneF, TwoF, ThreeF, N, Write, Skip, WriteSkip, Finish
 		clrf		SkipCount
+		; Check if there is No Data first
+		ReadEEPROM	EEPROM_REG, addrH, addrL
+		movlw		0xFF
+		cpfseq		EEPROM_REG
+		goto		Again
+		DispTable	NoData
+		goto		Finish
 Again
 		; Put a space every 3 Writes
 		movlw		d'3'
@@ -315,7 +324,7 @@ END_ISR_HIGH
 ; ****************************************************************************
 
 MainMenu_L1		db	"Standby", 0
-MainMenu_L2		db	"1:30PM, 2/3/2014", 0
+;MainMenu_L2		db	"1:30PM, 2/3/2014", 0
 Operation_L1	db	"In Operation...", 0
 OpLog_L1		db	"Oprtn. Time: 89s", 0
 OpLog_L2		db	"12:00PM, 2/3/14"
@@ -326,16 +335,15 @@ PermLog_L2		db	"1  2  3  4", 0
 PermLog1_L1		db	"Permanent Log 1", 0
 PCInter_L1		db	"PC Interface", 0
 PCInter_L2		db	"Connect to PC...", 0
+NoData			db	"No Data", 0
 
 ; ****************************************************************************
 ; MAIN PROGRAM
 ; ****************************************************************************
         CODE
 Init
-        ;clrf		INTCON         ; No interrupts
-        ;clrf		TRISA          ; All port A is output
-
-        movlw       b'00110000'    ; Set PORTA4 as input
+		; Setup I/O
+        movlw       b'00110000'    ; Set PORTA<4:5> as input
         movwf       TRISA
         movlw       b'00000111'    ; Set PORTE<0:2> as input
         movwf       TRISE
@@ -343,31 +351,56 @@ Init
         movwf		TRISB
 		movlw		b'00011000'
 		movwf		TRISC			; RC3, RC4 input for RTC
-
+		; Clear Ports
         clrf		TRISD          ; All port D is output
         clrf		LATA
         clrf		LATB
         clrf		LATC
         clrf		LATD
 		clrf		LATE
+		; Setup Peripherals
 		call		InitLCD
-
+		call		i2c_common_setup
+		; Setup Interrupts
         bcf         RCON, IPEN          ; Legacy mode interrupts
         bsf         INTCON, GIE         ; Allow global interrupt
         bsf         INTCON3, INT1IE     ; enable INT1 int flag bit on RB1
         bsf         INTCON2, INTEDG1    ; set INTEDG1 to detect rising edge
-
+		; Clear first 15 bytes of EEPROM
+		clrf		EEPROM_H
+		clrf		EEPROM_L
+		setf		EEPROM_CLEAR
+		clrf		Counter
+ClearNext
+		WriteEEPROM EEPROM_CLEAR, EEPROM_H, EEPROM_L
+		incf		Counter
+		incf		EEPROM_L
+		movlw		d'15'
+		cpfseq		Counter
+		goto		ClearNext
+		; Clear FSR
 		clrf		EEPROM_H			; Initialize EEPROM address
 		clrf		EEPROM_L
+		clrf		Counter
 		clrf		FL_count
 		clrf		TrayEncoder
 		clrf		LED_Count
 		clrf		SkipCount
 
-		;TEST OPLOG
+		; TEST OPLOG
 		bsf			LATE, 0
 		bsf			LATE, 1
 		bsf			LATE, 2
+
+		; SET UP RTC
+		rtc_resetAll
+		; 11:48PM, 12/31/2094
+		rtc_set 0x00, b'00000000'		; Set seconds to 0
+		rtc_set 0x01, b'01001000'		; Set minutes (48)
+		rtc_set	0x02, b'01110001'		; Set hours (11PM)
+		rtc_set 0x04, b'00110001'		; Set day (31)
+		rtc_set	0x05, b'00010010'		; Set month (12)
+		rtc_set 0x06, b'10010100'		; Set year (94)
 
 
 ; STANDBY STATE
@@ -375,7 +408,7 @@ Standby
 		call		ClrLCD
 		DispTable	MainMenu_L1
 		call LCD_L2
-		DispTable	MainMenu_L2
+		;DispTable	MainMenu_L2
 Stay_Standby
 		call		ReadKEY						; Wait for key inputs
 		ChangeState keyA, Operation				; A for Operation
@@ -390,7 +423,7 @@ Operation
 		call		ClrLCD
 		DispTable	Operation_L1
 		call		LCD_L2
-		DispTable	MainMenu_L2
+		;DispTable	MainMenu_L2
         clrf        FL_count                    ; Clear FL_count to 0
 
         ;TESTING
