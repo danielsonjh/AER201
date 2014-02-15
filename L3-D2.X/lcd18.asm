@@ -1,11 +1,5 @@
 	#include <p18f4620.inc>
 
-;Declare unbanked variables (at 0x70 and on)
-	udata
-lcd_tmp	res	1
-lcd_d1	res	1
-lcd_d2	res	1
-
 ;Declare constants for pin assignments (LCD on PORTD)
 RS 	equ 2
 E 	equ 3
@@ -13,6 +7,9 @@ E 	equ 3
 #define		LCD_RS      LATD, 2        ; for v 1.0 used PORTD.3
 #define		LCD_E       LATD, 3        ; for v 1.0 used PORTD.2
 
+lcd_tmp	equ	0x10
+lcd_d1	equ	0x11
+lcd_d2	equ 0x12
 temp_lcd	EQU     0x20           ; buffer for Instruction
 dat			EQU     0x21           ; buffer for data
 delay1		EQU		0x25

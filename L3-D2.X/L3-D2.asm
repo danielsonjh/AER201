@@ -54,6 +54,8 @@ keyD		equ		d'15'
 STATUS_TEMP equ     0x00
 W_TEMP      equ     0x01
 
+; 0x10 to 0x29 for LCD
+
 delayReg	equ		0x30
 
 KEY			equ		0x50
@@ -70,16 +72,19 @@ PhotoInput  equ     0x70
 
 EEPROM_H    equ     0x80
 EEPROM_L    equ     0x81
+EEPROM_REG	equ		0x82
+LED_Count	equ		0x83
+SkipCount	equ		0x84
 
-RTC_Second                  equ 0x45
-RTC_Minute                  equ 0x46
-RTC_Hour                    equ 0x47
-RTC_Day                     equ 0x48
-RTC_Date                    equ 0x49
-RTC_Month                   equ 0x4A
-RTC_Year                    equ 0x50
-RTC_L                       equ 0x51
-RTC_H                       equ 0x52
+RTC_Second  equ		0x90
+RTC_Minute  equ		0x91
+RTC_Hour    equ		0x92
+RTC_Day     equ		0x93
+RTC_Date    equ		0x94
+RTC_Month   equ		0x95
+RTC_Year    equ		0x96
+RTC_L       equ		0x97
+RTC_H       equ		0x98
 
 
 ; ****************************************************************************
@@ -114,55 +119,123 @@ Again
 
 ; Display Table Data on LCD
 DispTable	macro	TableVar
-	local	Again
-	movlw	upper TableVar	; Move Table<20:16> into TBLPTRU
-	movwf	TBLPTRU
-	movlw	high TableVar	; Move Table<15:8> into TBLPTRH
-	movwf	TBLPTRH
-	movlw	low TableVar	; Move Table<7:0> into TBLPTRL
-	movwf	TBLPTRL
-	tblrd*					; Read byte at TBLPTR and copy to TABLAT
-	movf	TABLAT, W		; Move byte into W
+		local	Again
+		movlw	upper TableVar	; Move Table<20:16> into TBLPTRU
+		movwf	TBLPTRU
+		movlw	high TableVar	; Move Table<15:8> into TBLPTRH
+		movwf	TBLPTRH
+		movlw	low TableVar	; Move Table<7:0> into TBLPTRL
+		movwf	TBLPTRL
+		tblrd*					; Read byte at TBLPTR and copy to TABLAT
+		movf	TABLAT, W		; Move byte into W
 Again
-    call	WR_DATA			; Write byte to LCD
-	tblrd+*					; Increment pointer
-	movf	TABLAT, W		; Move new byte into W
-	bnz		Again			; Keep going until the end (0 byte)
-			endm
+		call	WR_DATA			; Write byte to LCD
+		tblrd+*					; Increment pointer
+		movf	TABLAT, W		; Move new byte into W
+		bnz		Again			; Keep going until the end (0 byte)
+				endm
+
+; Display Operation Log on LCD
+DispOpLog	macro	addrH, addrL
+		local		Again, P, OneF, TwoF, ThreeF, N, Write, Skip, WriteSkip, Finish
+		clrf		SkipCount
+Again
+		; Put a space every 3 Writes
+		movlw		d'3'
+		cpfslt		SkipCount
+		goto		Skip
+		; Read EEPROM data
+		ReadEEPROM	EEPROM_REG, addrH, addrL
+		btfsc		EEPROM_REG, 7	; If bit 7 is (1) Finish
+		goto		Finish
+		; Check if FL was present
+		btfss		EEPROM_REG, 3	; If bit 3 is (1), there was a FL
+		goto		N				; If bit 3 is (0), there was no FL, so print N
+		; Count how many LED was on
+		btfsc		EEPROM_REG, 2
+		incf		LED_Count
+		btfsc		EEPROM_REG, 1
+		incf		LED_Count
+		btfsc		EEPROM_REG, 0
+		incf		LED_Count
+		; Branch to appropriate #
+		movlw		d'3'
+		cpfslt		LED_Count
+		goto		P
+		movlw		d'2'
+		cpfslt		LED_Count
+		goto		OneF
+		movlw		d'1'
+		cpfslt		LED_Count
+		goto		TwoF
+		goto		ThreeF
+P
+		movlw		0x50
+		goto		Write
+OneF
+		movlw		0x31
+		goto		Write
+TwoF
+		movlw		0x32
+		goto		Write
+ThreeF
+		movlw		0x33
+		goto		Write
+N
+		movlw		0x4E			; ASCII 'N'
+		goto		Write
+Write
+		call		WR_DATA			; Write Char to LCD
+		incf		addrL			; Next byte in EEPROM
+		incf		SkipCount
+		clrf		LED_Count
+		goto		Again
+Skip
+		movlw		0x20			; ASCII ' '
+		goto		WriteSkip
+WriteSkip
+		call		WR_DATA
+		clrf		SkipCount
+		goto		Again
+Finish
+		nop
+		endm
 
 ; Write word to EEPROM
 WriteEEPROM macro   word, addrH, addrL
-        movlw       addrH           ; Set high address
-        movwf       EEADRH
-        movlw       addrL           ; Set low address
-        movwf       EEADR
-        movf        word, W         ; Set word data
-        movwf       EEDATA
-        bcf         EECON1, EEPGD   ; Point to DATA memory                                                      ; ADDED AN E
+        movff       addrH, EEADRH   ; Set high address
+        movff       addrL, EEADR    ; Set low address
+        movff       word,  EEDATA   ; Set word data
+
+		btfsc		EECON1, WR		; Check if WR = 0
+		bra			$-2
+
+        bcf         EECON1, EEPGD   ; Point to DATA memory                                              ; ADDED AN E
         bcf         EECON1, CFGS    ; Access EEPROM
         bsf         EECON1, WREN    ; Enable writes
-
         bcf         INTCON, GIE     ; Disable interrupts
-        movlw       55h
+		bcf			PIR2, EEIF																			; lolwut?
+
+        movlw       0x55
         movwf       EECON2          ; Write 55h
         movlw       0xAA            ;
         movwf       EECON2          ; Write 0xAA
         bsf         EECON1, WR      ; Set WR bit to begin write
-        bsf         INTCON, GIE     ; Enable interrupts
+        btfsc		EECON1, WR
+		bra			$-2
 
+		bsf         INTCON, GIE     ; Enable interrupts
         bcf         EECON1, WREN    ; Diable writes on write complete (EEIF set)
             endm
 
-; Read EEPROM into WREG
-ReadEEPROM  macro   addrH, addrL
-        movlw       addrH           ; Set high address
-        movwf       EEADRH
-        movlw       addrL           ; Set low address
-        movwf       EEADR
+; Read EEPROM into file
+ReadEEPROM  macro   file, addrH, addrL
+        movff       addrH, EEADRH   ; Set high address
+        movff       addrL, EEADR    ; Set low address
         bcf         EECON1, EEPGD   ; Point to DATA memory
         bcf         EECON1, CFGS    ; Access EEPROM
         bsf         EECON1, RD      ; EEPROM Read
-        movf        EEDATA, WREG    ; W <- EEDATA
+        movff       EEDATA, file    ; file <- EEDATA
             endm
 
 ; Change FSM State
@@ -245,7 +318,7 @@ Operation_L1	db	"In Operation...", 0
 OpLog_L1		db	"Oprtn. Time: 89s", 0
 OpLog_L2		db	"12:00PM, 2/3/14"
 OpLogDetails_L1	db	"#: 123 456 789", 0
-OpLogDetails_L2	db	"?: PP1 P23 PNN", 0
+OpLogDetails_L2	db	"?: ", 0
 PermLog_L1		db	"Permanent Logs", 0
 PermLog_L2		db	"1  2  3  4", 0
 PermLog1_L1		db	"Permanent Log 1", 0
@@ -260,14 +333,16 @@ Init
         ;clrf		INTCON         ; No interrupts
         ;clrf		TRISA          ; All port A is output
 
-        movlw       b'00010000'    ; Set PORTA4 as input
+        movlw       b'00110000'    ; Set PORTA4 as input
         movwf       TRISA
 
-        movlw       b'00000111'         ; Set PORTE<0:2> as input
+        movlw       b'00000111'    ; Set PORTE<0:2> as input
         movwf       TRISE
 
         movlw		b'11111111'    ; Set required keypad inputs (RB0 is interrupt)
         movwf		TRISB
+
+		movlw		b'00011000'
         clrf		TRISC          ; All port C is output
         clrf		TRISD          ; All port D is output
         clrf		LATA
@@ -278,13 +353,15 @@ Init
 
         bcf         RCON, IPEN          ; Legacy mode interrupts
         bsf         INTCON, GIE         ; Allow global interrupt
-        bsf         INTCON3, INT1IE     ; enable INT0 int flag bit on RB0
-        bsf         INTCON2, INTEDG1    ; set INTEDG0 to detect rising edge
+        bsf         INTCON3, INT1IE     ; enable INT1 int flag bit on RB1
+        bsf         INTCON2, INTEDG1    ; set INTEDG1 to detect rising edge
 
-		clrf		EEPROM_H
+		clrf		EEPROM_H			; Initialize EEPROM address
 		clrf		EEPROM_L
 		clrf		FL_count
 		clrf		TrayEncoder
+		clrf		LED_Count
+		clrf		SkipCount
 
 
 ; STANDBY STATE
@@ -306,7 +383,7 @@ Operation
         setf        InOperation
 		call		ClrLCD
 		DispTable	Operation_L1
-		call LCD_L2
+		call		LCD_L2
 		DispTable	MainMenu_L2
         clrf        FL_count                    ; Clear FL_count to 0
 
@@ -384,6 +461,9 @@ OpLogDetails
 		DispTable	OpLogDetails_L1
 		call LCD_L2
 		DispTable	OpLogDetails_L2
+		clrf		EEPROM_H					; Display recent operation log
+		clrf		EEPROM_L
+		DispOpLog	EEPROM_H, EEPROM_L
 StayOpLogDetails
 		call		ReadKEY
 		ChangeState keyStar, OpLog
@@ -436,6 +516,8 @@ Stay_PCInter
 ; SUBROUTINES
 ; ****************************************************************************
 
+
+
 ; DATA SUBROUTINES
 PhotoData                                       ; CALLED FROM FOUND_FL
         movff       PORTE, PhotoInput           ; Take input from photo sensors
@@ -443,15 +525,13 @@ PhotoData                                       ; CALLED FROM FOUND_FL
         movlw       b'00001111'
         andwf       PhotoInput
         WriteEEPROM PhotoInput, EEPROM_H, EEPROM_L
-        movlw       1                           ; Increment EEPROM_L for next data
-        addwf       EEPROM_L
+        incf		EEPROM_L
         return
 
 NoPhotoData
         clrf        PhotoInput
         WriteEEPROM PhotoInput, EEPROM_H, EEPROM_L
-        movlw       1
-        addwf       EEPROM_L
+        incf		EEPROM_L
         return
 
 ; STEPPER MOTOR SUBROUTINES

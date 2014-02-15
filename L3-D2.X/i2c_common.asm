@@ -1,4 +1,4 @@
-    include <p16f877.inc>
+    include <p18f4620.inc>
 	errorlevel	-302
 	errorlevel	-305
 
@@ -118,9 +118,9 @@ i2c_common_setup
     movwf       SSPADD          ;RTC only supports 100kHz
 
     movlw       b'00001000'     ;Config SSP for Master Mode I2C
-	banksel		SSPCON
-    movwf       SSPCON
-    bsf         SSPCON,SSPEN    ;Enable SSP module
+	banksel		SSPCON1
+    movwf       SSPCON1
+    bsf         SSPCON1,SSPEN    ;Enable SSP module
     i2c_common_stop        		;Ensure the bus is free
 	return
 
