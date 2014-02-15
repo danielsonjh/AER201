@@ -33,7 +33,7 @@ i2c_common_start	macro
 	banksel     SSPCON2
     bsf         SSPCON2,SEN
     btfsc       SSPCON2,SEN
-    goto        $-1
+    goto        $-2
 	endm
 
 i2c_common_stop	macro
@@ -43,7 +43,7 @@ i2c_common_stop	macro
 	banksel     SSPCON2
     bsf         SSPCON2,PEN
     btfsc       SSPCON2,PEN
-    goto        $-1
+    goto        $-2
 	endm
 
 i2c_common_repeatedstart	macro
@@ -54,7 +54,7 @@ i2c_common_repeatedstart	macro
 	banksel     SSPCON2
     bsf         SSPCON2,RSEN
     btfsc       SSPCON2,RSEN
-    goto        $-1
+    goto        $-2
 	endm
 
 i2c_common_ack		macro
@@ -65,7 +65,7 @@ i2c_common_ack		macro
     bcf         SSPCON2,ACKDT
     bsf         SSPCON2,ACKEN
     btfsc       SSPCON2,ACKEN
-    goto        $-1
+    goto        $-2
     endm
 
 i2c_common_nack	macro
@@ -76,7 +76,7 @@ i2c_common_nack	macro
    bsf         SSPCON2,ACKDT
    bsf         SSPCON2,ACKEN
    btfsc       SSPCON2,ACKEN
-   goto        $-1
+   goto        $-2
    endm
 
 i2c_common_write	macro	
@@ -88,7 +88,7 @@ i2c_common_write	macro
    movwf       SSPBUF
    banksel     SSPSTAT
    btfsc       SSPSTAT,R_W 		;While transmit is in progress, wait
-   goto        $-1
+   goto        $-2
    banksel     SSPCON2
    endm
 
@@ -99,7 +99,7 @@ i2c_common_read	macro
    banksel     SSPCON2
    bsf         SSPCON2,RCEN    ;Begin receiving byte from
    btfsc       SSPCON2,RCEN
-   goto        $-1
+   goto        $-2
    banksel     SSPBUF
    movf        SSPBUF,w
    endm

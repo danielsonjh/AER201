@@ -1,5 +1,6 @@
 #include <p18f4620.inc>
 #include <lcd18.inc>
+#include <rtc_macros.inc>
 list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 
 ; ****************************************************************************
@@ -54,7 +55,7 @@ keyD		equ		d'15'
 STATUS_TEMP equ     0x00
 W_TEMP      equ     0x01
 
-; 0x10 to 0x29 for LCD
+; 0x20 to 0x27 for LCD
 
 delayReg	equ		0x30
 
@@ -67,8 +68,9 @@ TrayEncoder equ     0x61
 stepDelay1  equ     0x62
 stepDelay2  equ     0x63
 FL_count    equ     0x64
+PhotoInput  equ     0x65
 
-PhotoInput  equ     0x70
+; 0x71 to 0x78 for RTC
 
 EEPROM_H    equ     0x80
 EEPROM_L    equ     0x81
@@ -335,20 +337,19 @@ Init
 
         movlw       b'00110000'    ; Set PORTA4 as input
         movwf       TRISA
-
         movlw       b'00000111'    ; Set PORTE<0:2> as input
         movwf       TRISE
-
-        movlw		b'11111111'    ; Set required keypad inputs (RB0 is interrupt)
+        movlw		b'11111111'		; Set required keypad inputs (RB0 is interrupt)
         movwf		TRISB
-
 		movlw		b'00011000'
-        clrf		TRISC          ; All port C is output
+		movwf		TRISC			; RC3, RC4 input for RTC
+
         clrf		TRISD          ; All port D is output
         clrf		LATA
         clrf		LATB
         clrf		LATC
         clrf		LATD
+		clrf		LATE
 		call		InitLCD
 
         bcf         RCON, IPEN          ; Legacy mode interrupts
@@ -362,6 +363,11 @@ Init
 		clrf		TrayEncoder
 		clrf		LED_Count
 		clrf		SkipCount
+
+		;TEST OPLOG
+		bsf			LATE, 0
+		bsf			LATE, 1
+		bsf			LATE, 2
 
 
 ; STANDBY STATE
@@ -520,7 +526,7 @@ Stay_PCInter
 
 ; DATA SUBROUTINES
 PhotoData                                       ; CALLED FROM FOUND_FL
-        movff       PORTE, PhotoInput           ; Take input from photo sensors
+        movff       LATE, PhotoInput           ; Take input from photo sensors
         bsf         PhotoInput, 3               ; Set 1 for break beam since FL was found
         movlw       b'00001111'
         andwf       PhotoInput

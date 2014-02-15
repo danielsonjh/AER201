@@ -7,11 +7,11 @@ E 	equ 3
 #define		LCD_RS      LATD, 2        ; for v 1.0 used PORTD.3
 #define		LCD_E       LATD, 3        ; for v 1.0 used PORTD.2
 
-lcd_tmp	equ	0x10
-lcd_d1	equ	0x11
-lcd_d2	equ 0x12
-temp_lcd	EQU     0x20           ; buffer for Instruction
-dat			EQU     0x21           ; buffer for data
+lcd_tmp		equ		0x20
+lcd_d1		equ		0x21
+lcd_d2		equ		0x22
+temp_lcd	EQU     0x23           ; buffer for Instruction
+dat			EQU     0x24           ; buffer for data
 delay1		EQU		0x25
 delay2		EQU		0x26
 delay3		EQU		0x27
