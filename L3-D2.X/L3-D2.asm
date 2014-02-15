@@ -71,6 +71,16 @@ PhotoInput  equ     0x70
 EEPROM_H    equ     0x80
 EEPROM_L    equ     0x81
 
+RTC_Second                  equ 0x45
+RTC_Minute                  equ 0x46
+RTC_Hour                    equ 0x47
+RTC_Day                     equ 0x48
+RTC_Date                    equ 0x49
+RTC_Month                   equ 0x4A
+RTC_Year                    equ 0x50
+RTC_L                       equ 0x51
+RTC_H                       equ 0x52
+
 
 ; ****************************************************************************
 ; MACROS
