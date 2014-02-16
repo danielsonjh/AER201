@@ -74,8 +74,8 @@ i2c_common_nack	macro
 ;desc:		send an not acknowledge to slave device
    bsf         SSPCON2,ACKDT
    bsf         SSPCON2,ACKEN
-   ;btfsc       SSPCON2,ACKEN
-   ;goto        $-2
+   btfsc       SSPCON2,ACKEN
+   goto        $-2
    endm
 
 i2c_common_write	macro	
@@ -83,12 +83,9 @@ i2c_common_write	macro
 ;output:	to slave device
 ;desc:		writes W to SSPBUF and send to slave device. Make sure
 ;			transmit is finished before continuing
-   ;banksel     SSPBUF
    movwf       SSPBUF
-   ;banksel     SSPSTAT
    btfsc       SSPSTAT,R_W 		;While transmit is in progress, wait
    goto        $-2
-   ;banksel     SSPCON2
    endm
 
 i2c_common_read	macro
@@ -110,15 +107,27 @@ i2c_common_setup
 ;input:		none
 ;output:	none
 ;desc:		sets up I2C as master device with 100kHz baud rate
-    clrf        SSPSTAT         ;I2C line levels, and clear all flags
+    movlw		b'10000000'
+	movwf       SSPSTAT         ;I2C line levels, and clear all flags
     movlw       d'24'         	;100kHz baud rate: 10MHz osc / [4*(24+1)]
     movwf       SSPADD          ;RTC only supports 100kHz
 
-    movlw       b'00101000'     ;Config SSP for Master Mode I2C
+    movlw       b'00001000'     ;Config SSP for Master Mode I2C
     movwf       SSPCON1
-    bsf         SSPCON1,SSPEN    ;Enable SSP module
+    bsf         SSPCON1,SSPEN   ;Enable SSP module
+	i2c_common_start
+	movlw		0xD0			; RTC slave address | write bit
+	i2c_common_write
+	movlw		0x07			; points to RTC register address
+	i2c_common_write
+	movlw		0x90			; Enable square wave output on RTC
+	i2c_common_write
     i2c_common_stop        		;Ensure the bus is free
 	return
+
+    bsf         SSPCON2,PEN
+    btfsc       SSPCON2,PEN
+    goto        $-2
 
 ;rtc Algorithms;;;;;;
 
@@ -131,15 +140,11 @@ write_rtc
         movlw       0xD0        ;DS1307 address | WRITE bit
         i2c_common_write
         i2c_common_check_ack   WR_ERR
-
         ;Write data to I2C bus (Register Address in RTC)
-		;banksel		0x73
         movf        0x73,w       ;Set register pointer in RTC
         i2c_common_write
         i2c_common_check_ack   WR_ERR
-
         ;Write data to I2C bus (Data to be placed in RTC register)
-		;banksel		0x74
         movf        0x74,w       ;Write data to register in RTC
         i2c_common_write
         i2c_common_check_ack   WR_ERR
@@ -162,7 +167,6 @@ read_rtc
         i2c_common_check_ack   RD_ERR
 
         ;Write data to I2C bus (Register Address in RTC)
-		;banksel		0x73
         movf        0x73,w       ;Set register pointer in RTC
         i2c_common_write
         i2c_common_check_ack   RD_ERR
@@ -175,7 +179,6 @@ read_rtc
 
         ;Read data from I2C bus (Contents of Register in RTC)
         i2c_common_read
-		;banksel		0x75
         movwf       0x75
         i2c_common_nack      ;Send acknowledgement of data reception
         

@@ -55,10 +55,8 @@ rtc_read	macro	addliteral
 ;			ASCII characters and the tens digit is placed into
 ;			0x77 and the ones digit is placed in 0x78
 	movlw	addliteral
-	;banksel	0x73
 	movwf	0x73
 	call	read_rtc
-	;banksel	0x75
 	movf	0x75,w
 	call	rtc_convert   
 	endm
