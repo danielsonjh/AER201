@@ -72,11 +72,10 @@ i2c_common_nack	macro
 ;input:		none
 ;output:	none
 ;desc:		send an not acknowledge to slave device
-   ;banksel     SSPCON2
    bsf         SSPCON2,ACKDT
    bsf         SSPCON2,ACKEN
-   btfsc       SSPCON2,ACKEN
-   goto        $-2
+   ;btfsc       SSPCON2,ACKEN
+   ;goto        $-2
    endm
 
 i2c_common_write	macro	
@@ -111,14 +110,11 @@ i2c_common_setup
 ;input:		none
 ;output:	none
 ;desc:		sets up I2C as master device with 100kHz baud rate
-	;banksel		SSPSTAT
     clrf        SSPSTAT         ;I2C line levels, and clear all flags
     movlw       d'24'         	;100kHz baud rate: 10MHz osc / [4*(24+1)]
-	;banksel		SSPADD
     movwf       SSPADD          ;RTC only supports 100kHz
 
-    movlw       b'00001000'     ;Config SSP for Master Mode I2C
-	;banksel		SSPCON1
+    movlw       b'00101000'     ;Config SSP for Master Mode I2C
     movwf       SSPCON1
     bsf         SSPCON1,SSPEN    ;Enable SSP module
     i2c_common_stop        		;Ensure the bus is free

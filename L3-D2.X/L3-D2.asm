@@ -29,11 +29,16 @@ list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 #define     Photo3              PORTE, 2
 #define		ArmSol              LATC, 5
 #define     GripSol             LATC, 2
+#define		GripMotorCW			LATC, 1
+#define		GripMotorCCW		LATC, 0
 #define     Step1a              LATA, 0
 #define     Step1b              LATA, 1
 #define     Step2a              LATA, 2
-#define     Step2b              LATA, 3
-#define     StepDelayVal        0x3F                                                                    ; EDIT FOR STEP DELAY
+#define     Step2b              LATA, 3																		 ; EDIT FOR STEP DELAY
+#define     StepDelayVal        0x3F
+#define		OpDelay				d'20'
+#define		GripMotorDelay		0x04
+#define		StepSize			0x01
 
 key1		equ		d'0'
 key2		equ		d'1'
@@ -59,6 +64,8 @@ Counter		equ		0x02
 ; 0x20 to 0x27 for LCD
 
 delayReg	equ		0x30
+reg100us	equ		0x31
+reg50ms		equ		0x32
 
 KEY			equ		0x50
 KEY_Temp	equ		0x51
@@ -89,6 +96,8 @@ RTC_Month   equ		0x95
 RTC_Year    equ		0x96
 RTC_L       equ		0x97
 RTC_H       equ		0x98
+RTC_Second_Diff     equ 0x99
+RTC_Minute_Diff     equ 0x9A
 
 
 ; ****************************************************************************
@@ -111,14 +120,34 @@ restContext macro
     movff   STATUS_TEMP, STATUS     ; restore STATUS last without affecting W
 			endm
 
-; Delay X microseconds
-delayMS     macro	countReg, MS
+; Delay 50xN milliseconds
+Delay50xNms macro	countReg, N
     local   Again
-    movlw   MS
+    movlw   N
     movwf	countReg
 Again
-    decfsz	countReg, F
+	call	Delay50ms
+    decfsz	countReg
     goto	Again
+			endm
+
+; Write RTC Data
+WriteRTC	macro
+		movff		0x77, W
+		call		WR_DATA
+		movff		0x78, W
+		call		WR_DATA
+			endm
+
+; Step Tray X Degrees
+XDegreeStep	macro	X
+		local	Again
+		movlw	X / StepSize
+		movwf	Counter
+Again
+		call	StepMotor
+		decfsz	Counter
+		goto	Again
 			endm
 
 ; Display Table Data on LCD
@@ -267,17 +296,6 @@ NotNext
 		movff		KEY_Temp, KEY	; Restore KEY for next check
 			endm
 
-StepMotor   macro
-        call        Step1
-        call        StepDelay
-        call        Step2
-        call        StepDelay
-        call        Step3
-        call        StepDelay
-        call        Step4
-        call        StepDelay
-            endm
-
 ; ****************************************************************************
 ; VECTORS
 ; ****************************************************************************
@@ -326,8 +344,9 @@ END_ISR_HIGH
 MainMenu_L1		db	"Standby", 0
 ;MainMenu_L2		db	"1:30PM, 2/3/2014", 0
 Operation_L1	db	"In Operation...", 0
-OpLog_L1		db	"Oprtn. Time: 89s", 0
-OpLog_L2		db	"12:00PM, 2/3/14"
+Operation_L2	db	"*: Stop", 0
+OpLog_L1		db	"Oprtn. Time: ", 0
+OpLog_L2		db	"12:00PM, 2/3/14", 0
 OpLogDetails_L1	db	"#: 123 456 789", 0
 OpLogDetails_L2	db	"?: ", 0
 PermLog_L1		db	"Permanent Logs", 0
@@ -342,6 +361,11 @@ NoData			db	"No Data", 0
 ; ****************************************************************************
         CODE
 Init
+		; Clear first 15 bytes of EEPROM (MIGHT NOT NEED THIS...)										; SLIGHT BUG WITH THIS WHEN RESETTING DURING A RUN AFTER 1 SUCCESSFUL RUN (Save PCL AFTER THIS)
+		clrf		EEPROM_H
+		clrf		EEPROM_L
+		setf		EEPROM_CLEAR
+		clrf		Counter
 		; Setup I/O
         movlw       b'00110000'    ; Set PORTA<4:5> as input
         movwf       TRISA
@@ -366,11 +390,7 @@ Init
         bsf         INTCON, GIE         ; Allow global interrupt
         bsf         INTCON3, INT1IE     ; enable INT1 int flag bit on RB1
         bsf         INTCON2, INTEDG1    ; set INTEDG1 to detect rising edge
-		; Clear first 15 bytes of EEPROM
-		clrf		EEPROM_H
-		clrf		EEPROM_L
-		setf		EEPROM_CLEAR
-		clrf		Counter
+
 ClearNext
 		WriteEEPROM EEPROM_CLEAR, EEPROM_H, EEPROM_L
 		incf		Counter
@@ -407,10 +427,8 @@ ClearNext
 Standby
 		call		ClrLCD
 		DispTable	MainMenu_L1
-		call LCD_L2
-		;DispTable	MainMenu_L2
 Stay_Standby
-		call		ReadKEY						; Wait for key inputs
+		call		Read_KEY_RTC				; Wait for key inputs
 		ChangeState keyA, Operation				; A for Operation
 		ChangeState keyB, OpLog					; B for OpLog
 		ChangeState keyC, PermLogMenu			; C for PermLog
@@ -423,7 +441,7 @@ Operation
 		call		ClrLCD
 		DispTable	Operation_L1
 		call		LCD_L2
-		;DispTable	MainMenu_L2
+		DispTable	Operation_L2
         clrf        FL_count                    ; Clear FL_count to 0
 
         ;TESTING
@@ -435,7 +453,7 @@ Operation
 FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
         btfss       BreakBeam
         goto        FIND_FL
-			; Step Motor 1 degree
+		XDegreeStep 1
         goto        FIND_FIRST_FL
 
 FIND_FL
@@ -443,33 +461,37 @@ FIND_FL
         goto        FOUND_FL                    ; If beam is broken (0) go to FOUND_FL
         dcfsnz      TrayEncoder                 ; Do nothing is tray encoder is not(0)
         goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0) go to NO_MORE_FL
-			; Step Motor 1 degree
+		XDegreeStep 1
         goto        FIND_FL
 
 FOUND_FL
         clrf        TrayEncoder                 ; Reset tray encoder since FL was found
-        movlw       1
-        addwf       FL_count                    ; Increment FL_count
+        incf		FL_count
         ; TURN ON LED
         bsf			ArmSol						; Pull arm down
+		Delay50xNms	delayReg, OpDelay			; Delay
         bsf         GripSol                     ; Pull grip in
+		Delay50xNms	delayReg, OpDelay			; Delay
         call        TurnGripCW                  ; Turn grip CW
         ; TAKE DATA FROM PHOTO SENSORS
         call        PhotoData
+		Delay50xNms	delayReg, OpDelay			; Delay 350ms
         ; TURN OFF LED
         call        TurnGripCCW                 ; Turn grip CCW
+		Delay50xNms	delayReg, OpDelay			; Delay
         bcf         GripSol                     ; Release grip
+		Delay50xNms	delayReg, OpDelay			; Delay
         bcf         ArmSol                      ; Release arm
+		Delay50xNms	delayReg, OpDelay			;	---->											; TAKE THIS OUT LATER, FOR TESTING RIGHT NOW
         ; CHECK EXIT CONDITIONS
         movlw       9                           ; Don't exit if under 9 count
-        cpfslt      FL_count
+        cpfslt      FL_count					; Skip if less than 9 FL counted
         goto        EXIT_OP                     ; Exit if FL_count is 9
-			; Step motor 20 degrees
+		XDegreeStep	20
         goto        FIND_FL                     ; Keep looking for FL if under 9 count
 
 NO_MORE_FL
-        movlw       1                           ; Increment FL_count
-        addwf       FL_count
+        incf		FL_count
         call        NoPhotoData					; Take data for N/A FL
         movlw       9                           ; Don't exit if under 9 count
         cpfslt      FL_count
@@ -488,7 +510,7 @@ Stay_Operation
 OpLog
 		call		ClrLCD
 		DispTable	OpLog_L1
-		call LCD_L2
+		call		LCD_L2
 		DispTable	OpLog_L2
 Stay_OpLog
 		call		ReadKEY
@@ -555,6 +577,26 @@ Stay_PCInter
 ; SUBROUTINES
 ; ****************************************************************************
 
+; DELAYS
+Delay100us							; delay 497 cycles (10MHz Clock)
+		movlw		0xA4			; 1 cycle
+		movwf		reg100us		; 1 cycle
+loop100us
+		decfsz		reg100us		; (3 * 164) - 1 = 491 cycles
+		goto		loop100us
+		nop							; 1 cycle
+		nop							; 1 cycle
+		return						; 2 cycles
+
+Delay50ms							; delay 125,000 cycles (10MHz Clock)
+		movlw		0xF9			; 1 cycle
+		movwf		reg50ms			; 1 cycle
+loop50ms
+		 call		Delay100us
+		 decfsz		reg50ms			; (497 + 3) * 249 - 1 = 124,499 Cycles
+		 goto		loop50ms
+		 call		Delay100us		; 497 cycles
+		 return						; 2 cycles
 
 
 ; DATA SUBROUTINES
@@ -609,12 +651,28 @@ StepDelayLoop
 		decfsz	stepDelay2, f           ; Delay2 counts down when Delay1 = 0
 d2		goto	StepDelayLoop
 		return
+StepMotor
+        call        Step1
+        call        StepDelay
+        call        Step2
+        call        StepDelay
+        call        Step3
+        call        StepDelay
+        call        Step4
+        call        StepDelay
+		return
 
 ; Turn Gripper Subroutines
 TurnGripCW
+		bsf			GripMotorCW
+		Delay50xNms	delayReg, GripMotorDelay
+		bcf			GripMotorCW
         return
 
 TurnGripCCW
+		bsf			GripMotorCCW
+		Delay50xNms	delayReg, GripMotorDelay
+		bcf			GripMotorCCW
         return
 
 ; Read Keypad Input
@@ -629,4 +687,47 @@ WaitKey
 		btfsc		PORTB,1     ;Wait until key is released
         goto		$-2			;Back 1 instruction
 		return
+
+Read_KEY_RTC
+WaitKeyRTC
+		; Reset to second line
+		call		LCD_L2
+		; Display hours
+		rtc_read	0x02
+		WriteRTC
+		movlw		0x3A		;ASCII ':'
+		call		WR_DATA
+		; Dispay minutes
+		rtc_read	0x01
+		WriteRTC
+		movlw		0x20		;ASCII ' '
+		call		WR_DATA
+		; Display month
+		rtc_read	0x05
+		WriteRTC
+		movlw		0x2F		; ASCII '/'
+		call		WR_DATA
+		; Display day
+		rtc_read	0x04
+		WriteRTC
+		movlw		0x2F		; ASCII '/'
+		call		WR_DATA
+		; Display year
+		movlw		0x32		; ASCII '2'
+		call		WR_DATA
+		movlw		0x30		; ASCII '0'
+		call		WR_DATA
+		rtc_read	0x06
+		WriteRTC
+		;Process KEY
+		btfss		PORTB,1     ;Wait until data is available from the keypad
+        goto		WaitKeyRTC	;Once a key is pressed,
+        swapf		PORTB,W     ;Read PortB<7:4> into W<3:0>
+		andlw		0x0F		;Mask 00001111
+		movwf		KEY			;Save result in KEY
+		movwf		KEY_Temp
+		btfsc		PORTB,1     ;Wait until key is released
+        goto		$-2			;Back 1 instruction
+		return
+
 	END
