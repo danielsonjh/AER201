@@ -74,8 +74,8 @@ i2c_common_nack	macro
 ;desc:		send an not acknowledge to slave device
    bsf         SSPCON2,ACKDT
    bsf         SSPCON2,ACKEN
-   btfsc       SSPCON2,ACKEN
-   goto        $-2
+   ;btfsc       SSPCON2,ACKEN
+   ;goto        $-2
    endm
 
 i2c_common_write	macro	

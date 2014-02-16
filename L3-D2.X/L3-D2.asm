@@ -35,10 +35,12 @@ list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 #define     Step1b              LATA, 1
 #define     Step2a              LATA, 2
 #define     Step2b              LATA, 3																		 ; EDIT FOR STEP DELAY
-#define     StepDelayVal        0x3F
+#define     StepDelayVal        0x1F
 #define		OpDelay				d'20'
 #define		GripMotorDelay		0x04
 #define		StepSize			0x01
+#define		TimerConstantH		0x9E			; 2^16 - 25000
+#define		TimerConstantL		0x58
 
 key1		equ		d'0'
 key2		equ		d'1'
@@ -60,6 +62,8 @@ keyD		equ		d'15'
 STATUS_TEMP equ     0x00
 W_TEMP      equ     0x01
 Counter		equ		0x02
+Temp		equ		0x03
+TempBCD		equ		0x04
 
 ; 0x20 to 0x27 for LCD
 
@@ -87,17 +91,8 @@ EEPROM_REG	equ		0x82
 LED_Count	equ		0x83
 SkipCount	equ		0x84
 
-RTC_Second  equ		0x90
-RTC_Minute  equ		0x91
-RTC_Hour    equ		0x92
-RTC_Day     equ		0x93
-RTC_Date    equ		0x94
-RTC_Month   equ		0x95
-RTC_Year    equ		0x96
-RTC_L       equ		0x97
-RTC_H       equ		0x98
-RTC_Second_Diff     equ 0x99
-RTC_Minute_Diff     equ 0x9A
+Op_Seconds	equ		0x90
+Op_Interrupts	equ	0x91
 
 
 ; ****************************************************************************
@@ -118,6 +113,36 @@ saveContext macro
 restContext macro
     swapf   W_TEMP, W               ; restore W first
     movff   STATUS_TEMP, STATUS     ; restore STATUS last without affecting W
+			endm
+
+; Increment file as 2 digit BCD
+incf_BCD	macro		file
+	local	justones, hundred, end_incf_BCD
+	movff	file, TempBCD
+	movff	file, Temp
+	; Process 1's digit BCD
+	movlw	0x0F
+	andwf	Temp					; Mask lower nibble of Temp
+	movlw	d'9'
+	; If 1's is 9:
+	cpfseq	Temp					; Skip if 1's digit is 9
+	goto	justones
+	movlw	b'00010000'				; Increment 10's digit of TempBCD
+	addwf	TempBCD
+	movlw	0xF0					; Clear 1's digit of TempBCD
+	andwf	TempBCD
+	goto	hundred
+	; If 1's is less than 9:
+justones
+	incf	TempBCD
+	goto	end_incf_BCD
+	; If A0 (100) happens:
+hundred
+	movlw	0xA0
+	cpfslt	TempBCD					; If TempBCD's 10's digit is less than 100, skip
+	clrf	TempBCD					; If TempBCD's 10's digit is 100, clear everything
+end_incf_BCD
+	movff	TempBCD, file
 			endm
 
 ; Delay 50xN milliseconds
@@ -306,6 +331,7 @@ NotNext
 	goto	ISR_HIGH
 
 	org		0x18				;low priority ISR
+	goto	ISR_LOW
 	retfie
 
 ; ****************************************************************************
@@ -313,27 +339,49 @@ NotNext
 ; ****************************************************************************
 
 ISR_HIGH
+;	saveContext								; 3
+;	; Reset Timer
+;	movlw		TimerConstantH				; 1
+;	addwf		TMR0H						; 1
+;	movlw		TimerConstantL				; 1
+;	addwf		TMR0L						; 1
+;	movlw		d'9'						; 1
+;	subwf		TMR0L						; 1
+;	; TIMER INTERRUPT
+;	btfss		INTCON, TMR0IF
+;	goto		END_ISR_HIGH
+;	; Increment as BCD interrupts and seconds
+;	incf_BCD	Op_Interrupts
+;	movlw		d'0'
+;	cpfsgt		Op_Interrupts
+;	incf_BCD	Op_Seconds
+;END_ISR_HIGH
+;	bcf			INTCON, TMR0IF
+;	restContext
+	retfie
+
+ISR_LOW
     saveContext
-    btfss   INTCON3, INT1IF        ; If KEYPAD interrupt, skip return
-    goto    END_ISR_HIGH
-
-    movlw   0xFF                ; If in operation, skip return
-    cpfseq  InOperation
-    goto    END_ISR_HIGH
-
-    swapf   PORTB, W            ; Read PORTB<7:4> into W<3:0>
-    andlw   0x0F
-    movwf   KEY_ISR            ; Put W into KEY_ISR
-    movlw   keyStar             ; Put keyStar into W to compare to KEY_ISR
-    cpfseq  KEY_ISR            ; If key was '*', skip return
-    goto    END_ISR_HIGH
-
-    clrf    TOSU                   ; Reset program counter
-    clrf    TOSH
-    clrf    TOSL
-
-END_ISR_HIGH
-    bcf     INTCON3, INT1IF        ; Clear flag for next interrupt
+	; KEYPAD INTERRUPT
+    btfss		INTCON3, INT1IF			; If KEYPAD interrupt, skip return
+    goto		END_ISR_LOW
+	; Check operation status
+    movlw		0xFF					; If in operation, skip return
+    cpfseq		InOperation
+    goto		END_ISR_LOW
+	; Process KEY
+    swapf		PORTB, W				; Read PORTB<7:4> into W<3:0>
+    andlw		0x0F
+    movwf		KEY_ISR					; Put W into KEY_ISR
+    movlw		keyStar					; Put keyStar into W to compare to KEY_ISR
+    cpfseq		KEY_ISR					; If key was '*', skip return
+    goto		END_ISR_LOW
+	; Reset program counter
+    clrf		TOSU
+    clrf		TOSH
+    clrf		TOSL
+END_ISR_LOW
+    bcf			INTCON3, INT1IF         ; Clear flag for next interrupt
     restContext
 	retfie
 
@@ -342,7 +390,6 @@ END_ISR_HIGH
 ; ****************************************************************************
 
 MainMenu_L1		db	"Standby", 0
-;MainMenu_L2		db	"1:30PM, 2/3/2014", 0
 Operation_L1	db	"In Operation...", 0
 Operation_L2	db	"*: Stop", 0
 OpLog_L1		db	"Oprtn. Time: ", 0
@@ -366,6 +413,13 @@ Init
 		clrf		EEPROM_L
 		setf		EEPROM_CLEAR
 		clrf		Counter
+ClearNext
+		WriteEEPROM EEPROM_CLEAR, EEPROM_H, EEPROM_L
+		incf		Counter
+		incf		EEPROM_L
+		movlw		d'15'
+		cpfseq		Counter
+		goto		ClearNext
 		; Setup I/O
         movlw       b'00110000'    ; Set PORTA<4:5> as input
         movwf       TRISA
@@ -385,19 +439,15 @@ Init
 		; Setup Peripherals
 		call		InitLCD
 		call		i2c_common_setup
+		;movlw		b'00001000'			; No 16-bit, internal, no prescaler
+		;movwf		T0CON
 		; Setup Interrupts
-        bcf         RCON, IPEN          ; Legacy mode interrupts
-        bsf         INTCON, GIE         ; Allow global interrupt
+        bsf         RCON, IPEN          ; Priority mode interrupts
+        bsf         INTCON, GIEH        ; Allow global interrupt
+		bsf			INTCON, GIEL
         bsf         INTCON3, INT1IE     ; enable INT1 int flag bit on RB1
         bsf         INTCON2, INTEDG1    ; set INTEDG1 to detect rising edge
-
-ClearNext
-		WriteEEPROM EEPROM_CLEAR, EEPROM_H, EEPROM_L
-		incf		Counter
-		incf		EEPROM_L
-		movlw		d'15'
-		cpfseq		Counter
-		goto		ClearNext
+		;bsf			INTCON, TMR0IE
 		; Clear FSR
 		clrf		EEPROM_H			; Initialize EEPROM address
 		clrf		EEPROM_L
@@ -406,6 +456,7 @@ ClearNext
 		clrf		TrayEncoder
 		clrf		LED_Count
 		clrf		SkipCount
+		clrf		InOperation
 
 		; TEST OPLOG
 		bsf			LATE, 0
@@ -437,12 +488,20 @@ Stay_Standby
 
 ; OPERATION STATE
 Operation
+		; Start Timer
+		clrf		TMR0H						; 1
+		clrf		TMR0L						; 1
+		movlw		TimerConstantH				; 1
+		addwf		TMR0H						; 1
+		movlw		TimerConstantL				; 1
+		addwf		TMR0L						; 1
+		bsf			T0CON, TMR0ON				; Turn on timer
+		; Display
         setf        InOperation
 		call		ClrLCD
 		DispTable	Operation_L1
 		call		LCD_L2
 		DispTable	Operation_L2
-        clrf        FL_count                    ; Clear FL_count to 0
 
         ;TESTING
 ;        bsf         ArmSol
@@ -498,7 +557,8 @@ NO_MORE_FL
         goto        EXIT_OP                     ; Exit if FL_count is 9
 
 EXIT_OP
-			;Stop Timer
+		;Stop Timer
+		bcf			T0CON, TMR0ON
         goto        OpLog
 
 Stay_Operation
@@ -510,6 +570,33 @@ Stay_Operation
 OpLog
 		call		ClrLCD
 		DispTable	OpLog_L1
+		; Display OpTime
+		; 10's seconds
+		swapf		Op_Seconds, Temp			; Swap and mask upper nibble of Op_Seconds
+		movlw		0x0F
+		andwf		Temp						; Temp = upper nibble of Op_Seconds
+		movff		Temp, W						; W = Temp
+		addlw		0x30						; Convert to ASCII
+		call		WR_DATA
+		; 1's seconds
+		movff		Op_Seconds, Temp			; Mask lower nibble of Op_Seconds
+		movlw		0x0F
+		andwf		Temp						; Temp = lower nibble of Op_Seconds
+		movff		Temp, W						; W = Temp
+		addlw		0x30						; Convert to ASCII
+		call		WR_DATA
+		; Write '.'
+		movlw		0x2E
+		call		WR_DATA
+		; .1's seconds
+		swapf		Op_Interrupts, Temp			; Swap and mask upper nibble of Op_Interrupts
+		movlw		0x0F
+		andwf		Temp						; Temp = upper nibble of Op_Interrupts
+		movff		Temp, W						; W = Temp
+		addlw		0x30						; Convert to ASCII
+		call		WR_DATA
+		; Write 's'
+		movlw		0x73
 		call		LCD_L2
 		DispTable	OpLog_L2
 Stay_OpLog
