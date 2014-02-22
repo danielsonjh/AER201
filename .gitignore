@@ -213,3 +213,6 @@ pip-log.txt
 
 #Mr Developer
 .mr.developer.cfg
+/L3-D2.X/nbproject/private
+/.idea
+/L3-D2.X/Makefile
