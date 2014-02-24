@@ -1,251 +1,276 @@
-    include <p18f4620.inc>
-	errorlevel	-302
-	errorlevel	-305
+#include <p18f4620.inc>
+
+    errorlevel -302
+    errorlevel -305
 
 ;global labels
 
-	global	write_rtc,read_rtc,rtc_convert,i2c_common_setup,p2p_write,p2p_read
+    variable _waitknt=0
 
-;Definition and variable declarations;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-        cblock    0x71			;these variable names are for reference only. The following
-        dt1			;0x71		 addresses are used for the RTC module
-        dt2			;0x72
-        ADD			;0x73
-        DAT			;0x74
-        DOUT		;0x75
-        B1			;0x76
-		dig10		;0x77
-		dig1		;0x78
-        endc
+    udata 0xB0
+regaddress res 1
+databyte res 1
+datachar res 1
+tens_digit res 1
+ones_digit res 1
+convert_buffer res 1
+
+
+    global write_rtc,read_rtc,rtc_convert,i2c_common_setup
+    global regaddress, databyte, datachar, tens_digit, ones_digit, convert_buffer
+
+
+;; I2C MACROS
+;;
+;; Sebastian K, commit 110219-2208
+;; forked off PIC16 sample code
+;; for PIC18F4620
+;; relocatable labels
+
+
 
 ;I2C lowest layer macros;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-i2c_common_check_ack	macro	err_address		;If bad ACK bit received, goto err_address
-	;banksel		SSPCON2
-    btfsc       SSPCON2,ACKSTAT
-    goto        err_address
-	endm
-
-i2c_common_start	macro
-;input:		none
-;output:	none
-;desc:		initiate start conditionon the bus
-	;banksel     SSPCON2
-    bsf         SSPCON2,SEN
-    btfsc       SSPCON2,SEN
-    goto        $-2
-	endm
-
-i2c_common_stop	macro
-;input: 	none
-;output:	none
-;desc:		initiate stop condition on the bus
-	;banksel     SSPCON2
-    bsf         SSPCON2,PEN
-    btfsc       SSPCON2,PEN
-    goto        $-2
-	endm
-
-i2c_common_repeatedstart	macro
-;input:		none
-;output:	none
-;desc:		initiate repeated start on the bus. Usually used for
-;			changing direction of SDA without STOP event
-	;banksel     SSPCON2
-    bsf         SSPCON2,RSEN
-    btfsc       SSPCON2,RSEN
-    goto        $-2
-	endm
-
-i2c_common_ack		macro
-;input:		none
-;output:	none
-;desc:		send an acknowledge to slave device
-    ;banksel     SSPCON2
-    bcf         SSPCON2,ACKDT
-    bsf         SSPCON2,ACKEN
-    btfsc       SSPCON2,ACKEN
-    goto        $-2
+i2c_common_check_ack macro err_address ;If bad ACK bit received, goto err_address
+    btfsc SSPCON2,ACKSTAT
+    goto err_address
     endm
 
-i2c_common_nack	macro
-;input:		none
-;output:	none
-;desc:		send an not acknowledge to slave device
-   bsf         SSPCON2,ACKDT
-   bsf         SSPCON2,ACKEN
-   btfsc       SSPCON2,ACKEN
-   goto        $-2
-   endm
+i2c_common_start macro
+    ;input: none
+    ;output: none
+    ;desc: initiate start conditionon the bus
+    bsf SSPCON2,SEN
+    btfss PIR1, SSPIF
+    bra $-2
 
-i2c_common_write	macro	
-;input:		W
-;output:	to slave device
-;desc:		writes W to SSPBUF and send to slave device. Make sure
-;			transmit is finished before continuing
-   movwf       SSPBUF
-   btfsc       SSPSTAT,R_W 		;While transmit is in progress, wait
-   goto        $-2
-   endm
+    bcf PIR1, SSPIF ;clear SSPIF interrupt bit
 
-i2c_common_read	macro
-;input:		none
-;output:	W
-;desc:		reads data from slave and saves it in W.
-   ;banksel     SSPCON2
-   bsf         SSPCON2,RCEN    ;Begin receiving byte from
-   btfsc       SSPCON2,RCEN
-   goto        $-2
-   ;banksel     SSPBUF
-   movf        SSPBUF,w
-   endm
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    endm
 
-	code
+i2c_common_stop macro
+    ;input: none
+    ;output: none
+    ;desc: initiate stop condition on the bus
+    bsf SSPCON2,PEN
+    btfsc SSPCON2,PEN
+    bra $-2
+    bcf PIR1, SSPIF
+    endm
+
+i2c_common_repeatedstart macro
+    ;input: none
+    ;output: none
+    ;desc: initiate repeated start on the bus. Usually used for
+    ; changing direction of SDA without STOP event
+    bsf SSPCON2,RSEN
+    btfss PIR1, SSPIF
+    bra $-2
+
+    bcf PIR1, SSPIF ;clear SSPIF interrupt bit
+
+    endm
+
+i2c_common_ack macro
+    ;input: none
+    ;output: none
+    ;desc: send an acknowledge to slave device
+    bcf SSPCON2,ACKDT
+    bsf SSPCON2,ACKEN
+    btfsc SSPCON2,ACKEN
+    bra $-2
+    endm
+
+i2c_common_nack macro
+    ;input: none
+    ;output: none
+    ;desc: send an not acknowledge to slave device
+    local   Again
+    bsf SSPCON2,ACKDT
+    bsf SSPCON2,ACKEN
+Again
+    btfsc SSPCON2,ACKEN
+    goto Again
+    endm
+
+i2c_common_write macro
+
+    ;input: W
+    ;output: to slave device
+    ;desc: writes W to SSPBUF and send to slave device. Make sure
+    ; transmit is finished before continuing
+
+    btfsc SSPSTAT, BF
+    bra $-2
+
+    movwf SSPBUF
+
+    btfss PIR1, SSPIF
+    bra $-2
+    bcf PIR1, SSPIF ;clear SSPIF interrupt bit
+
+    endm
+
+i2c_common_read macro
+    ;input: none
+    ;output: W
+    ;desc: reads data from slave and saves it in W.
+
+    bsf SSPCON2,RCEN ;Begin receiving byte from
+    btfss PIR1, SSPIF
+    bra $-2
+    bcf PIR1, SSPIF
+    movf SSPBUF,w
+    endm
+    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+    code
 
 i2c_common_setup
-;input:		none
-;output:	none
-;desc:		sets up I2C as master device with 100kHz baud rate
-    movlw		b'10000000'
-	movwf       SSPSTAT         ;I2C line levels, and clear all flags
-    movlw       d'24'         	;100kHz baud rate: 10MHz osc / [4*(24+1)]
-    movwf       SSPADD          ;RTC only supports 100kHz
+    ;input: none
+    ;output: none
+    ;desc: sets up I2C as master device with 100kHz baud rate
 
-    movlw       b'00001000'     ;Config SSP for Master Mode I2C
-    movwf       SSPCON1
-    bsf         SSPCON1,SSPEN   ;Enable SSP module
-	i2c_common_start
-	movlw		0xD0			; RTC slave address | write bit
-	i2c_common_write
-	movlw		0x07			; points to RTC register address
-	i2c_common_write
-	movlw		0x90			; Enable square wave output on RTC
-	i2c_common_write
-    i2c_common_stop        		;Ensure the bus is free
-	return
+    movlw b'10000000'
+    movwf SSPSTAT ;set I2C line leves, clear all flags.
 
-    bsf         SSPCON2,PEN
-    btfsc       SSPCON2,PEN
-    goto        $-2
+    movlw 24 ;100kHz baud rate: 10000000 osc / [4*100000] -1
+    movwf SSPADD ;RTC only supports 100kHz
 
-;rtc Algorithms;;;;;;
+    movlw b'00101000' ;Config SSP for Master Mode I2C
+    movwf SSPCON1
+
+    bsf SSPCON1,SSPEN ;Enable SSP module
+
+
+    bcf PIR2, SSPIE ;don't cause an interrupt on SSPIF, please. We're just polling it.
+    bcf PIR1, SSPIF
+    bcf SSPSTAT, BF
+    i2c_common_stop ;Ensure the bus is free
+    return
+
+    ;rtc Algorithms;;;;;;
 
 write_rtc
-;input:		address of register in RTC
-;output:	none
-;Desc:		handles writing data to RTC
-        ;Select the DS1307 on the bus, in WRITE mode
-        i2c_common_start
-        movlw       0xD0        ;DS1307 address | WRITE bit
-        i2c_common_write
-        i2c_common_check_ack   WR_ERR
-        ;Write data to I2C bus (Register Address in RTC)
-        movf        0x73,w       ;Set register pointer in RTC
-        i2c_common_write
-        i2c_common_check_ack   WR_ERR
-        ;Write data to I2C bus (Data to be placed in RTC register)
-        movf        0x74,w       ;Write data to register in RTC
-        i2c_common_write
-        i2c_common_check_ack   WR_ERR
-        goto        WR_END
-WR_ERR
-        nop
-WR_END  
-		i2c_common_stop	;Release the I2C bus
-        return
 
+    ;input: address of register in RTC
+    ;output: none
+    ;Desc: handles writing data to RTC
+    ;Select the DS1307 on the bus, in WRITE mode
+    i2c_common_start
+
+
+
+    movlw 0xD0 ;DS1307 address | WRITE bit
+    i2c_common_write
+    i2c_common_check_ack WR_ERR1
+
+    ;Write data to I2C bus (Register Address in RTC)
+    movf regaddress,w ;Set register pointer in RTC
+    i2c_common_write ;
+    i2c_common_check_ack WR_ERR2
+
+    ;Write data to I2C bus (Data to be placed in RTC register)
+    movf databyte,w ;Write data to register in RTC
+    i2c_common_write
+    i2c_common_check_ack WR_ERR3
+
+    goto WR_END
+WR_ERR1
+    nop
+    movlw b'00001101'
+    movwf LATA
+
+    goto WR_END
+WR_ERR2
+    nop
+    movlw b'00001111'
+    movwf LATA
+    bsf LATE,0
+    goto WR_END
+WR_ERR3
+    nop
+    movlw b'00001001'
+    movwf LATA
+    goto WR_END
+WR_END
+    i2c_common_stop ;Release the I2C bus
+    return
+
+    ;; ************************************************** READ RTC
 read_rtc
-;input:		address of RTC
-;output:	DOUT or 0x75
-;Desc:		This reads from the selected address of the RTC
-;			and saves it into DOUT or address 0x75
-        ;Select the DS1307 on the bus, in WRITE mode
-        i2c_common_start
-        movlw       0xD0        ;DS1307 address | WRITE bit
-        i2c_common_write
-        i2c_common_check_ack   RD_ERR
+    ;input: address of RTC
+    ;output: DOUT or 0x75
+    ;Desc: This reads from the selected address of the RTC
+    ; and saves it into DOUT or address 0x75
 
-        ;Write data to I2C bus (Register Address in RTC)
-        movf        0x73,w       ;Set register pointer in RTC
-        i2c_common_write
-        i2c_common_check_ack   RD_ERR
+    ;Select the DS1307 on the bus, in WRITE mode
 
-        ;Re-Select the DS1307 on the bus, in READ mode
-        i2c_common_repeatedstart
-        movlw       0xD1        ;DS1307 address | READ bit
-        i2c_common_write
-        i2c_common_check_ack   RD_ERR
+    i2c_common_start
 
-        ;Read data from I2C bus (Contents of Register in RTC)
-        i2c_common_read
-        movwf       0x75
-        i2c_common_nack      ;Send acknowledgement of data reception
-        
-        goto        RD_END
+    movlw 0xD0 ;DS1307 address | WRITE bit
+    i2c_common_write ;
+    i2c_common_check_ack RD_ERR1
 
-RD_ERR 
-        nop
-        
-        ;Release the I2C bus
-RD_END  i2c_common_stop
-        return
+    ;Write data to I2C bus (Register Address in RTC)
+    movf regaddress,w ;Set register pointer in RTC
+    i2c_common_write ;
+    i2c_common_check_ack RD_ERR2
 
-rtc_convert   
-;input:		W
-;output:	dig10 (0x77), dig1 (0x78)
-;desc:		This subroutine converts the binary number
-;			in W into a two digit ASCII number and place
-;			each digit into the corresponding registers
-;			dig10 or dig1
-	;banksel	0x76
-	movwf   0x76             ; B1 = HHHH LLLL
-    swapf   0x76,w           ; W  = LLLL HHHH
-    andlw   0x0f           ; Mask upper four bits 0000 HHHH
-    addlw   0x30           ; convert to ASCII
-    movwf	0x77		   ;saves into 10ths digit
+    ;Re-Select the DS1307 on the bus, in READ mode
+    i2c_common_repeatedstart
+    movlw 0xD1 ;DS1307 address | READ bit
+    i2c_common_write
+    i2c_common_check_ack RD_ERR3
 
-	;banksel	0x76
-    movf    0x76,w
-    andlw   0x0f           ; w  = 0000 LLLL
-    addlw   0x30           ; convert to ASCII		
-    movwf	0x78	       ; saves into 1s digit
-   	return
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+    ;Read data from I2C bus (Contents of Register in RTC)
+    i2c_common_read
+    movwf datachar
+    i2c_common_nack ;Send acknowledgement of data reception
 
 
-;pic to pic subroutines;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-p2p_write
-        ;Select the DS1307 on the bus, in WRITE mode
-        i2c_common_start
-        movlw       b'00010000'
-        i2c_common_write
-        i2c_common_check_ack   W_END 
+    goto RD_END
 
-		;banksel	0x70
-		movf	0x70, W
-        i2c_common_write
-        i2c_common_check_ack   W_END 
-        goto        W_END
-W_END  
-		i2c_common_stop	;Release the I2C bus
-        return
+RD_ERR1
+    nop
+    movlw b'00000011'
+    movwf LATA
+    goto RD_END
+RD_ERR2
+    nop
+    movlw b'00000101'
+    movwf LATA
+    goto RD_END
+RD_ERR3
+    nop
+    movlw b'00000111'
+    movwf LATA
+    goto RD_END
+    ;Release the I2C bus
+RD_END
+    i2c_common_stop
+    return
+
+rtc_convert
+    ;input: W
+    ;output: tens_digit, ones_digit
+    ;desc: This subroutine converts the binary number
+    ; in W into a two digit ASCII number and place
+    ; each digit into the corresponding registers
+    ; dig10 or dig1
+
+    movwf convert_buffer ; B1 = HHHH LLLL
+    swapf convert_buffer,w ; W = LLLL HHHH
+    andlw 0x0f ; Mask upper four bits 0000 HHHH
+    addlw 0x30 ; convert to ASCII
+    movwf tens_digit ;saves into 10ths digit
+
+    movf convert_buffer,w
+    andlw 0x0f ; w = 0000 LLLL
+    addlw 0x30 ; convert to ASCII
+    movwf ones_digit ; saves into 1s digit
+    return
 
 
-p2p_read
-        ;Select the DS1307 on the bus, in WRITE mode
-        i2c_common_start
-		movlw       b'00010001'
-        i2c_common_write
-		i2c_common_check_ack   R_END
 
-        i2c_common_read
-		;banksel		0x70
-        movwf       0x70
-        i2c_common_nack      ;Send acknowledgement of data reception
-R_END
-		i2c_common_stop
-        return
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-	end
+    end

@@ -1,7 +1,7 @@
 #include <p18f4620.inc>
 #include <lcd18.inc>
 #include <rtc_macros.inc>
-list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
+	list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 
 ; ****************************************************************************
 ; Configuration Bits
@@ -34,71 +34,84 @@ list P=18F4620, F=INHX32, C=160, N=80, ST=OFF, MM=OFF, R=DEC
 #define     Step1a              LATA, 0
 #define     Step1b              LATA, 1
 #define     Step2a              LATA, 2
-#define     Step2b              LATA, 3																		 ; EDIT FOR STEP DELAY
-#define     StepDelayVal        0x3F
-#define		OpDelay				d'20'
-#define		GripMotorDelay		0x04
+#define     Step2b              LATA, 3
+#define		TimerConstantH		0x9E			; 2^16 - 25000
+#define		TimerConstantL		0x58
+; Permanent Log Controls
+#define		TempEEPROM_L_Const	d'220'
+#define		LastPermLog			d'168'
+; Stepper Controls
 #define		StepSize			0x01
+#define		GearRatio			d'4'
+#define     StepDelayVal        0x03
+; Operation Controls
+#define		OpDelay				d'1'
+#define		GripMotorDelay		d'1'
 
-key1		equ		d'0'
-key2		equ		d'1'
-key3		equ		d'2'
-keyA		equ		d'3'
-key4		equ		d'4'
-key5		equ		d'5'
-key6		equ		d'6'
-keyB		equ		d'7'
-key7		equ		d'8'
-key8		equ		d'9'
-key9		equ		d'10'
-keyC		equ		d'11'
-keyStar		equ		d'12'
-key0		equ		d'13'
-keyHash		equ		d'14'
-keyD		equ		d'15'
+key1				equ		d'0'
+key2				equ		d'1'
+key3				equ		d'2'
+keyA				equ		d'3'
+key4				equ		d'4'
+key5				equ		d'5'
+key6				equ		d'6'
+keyB				equ		d'7'
+key7				equ		d'8'
+key8				equ		d'9'
+key9				equ		d'10'
+keyC				equ		d'11'
+keyStar				equ		d'12'
+key0				equ		d'13'
+keyHash				equ		d'14'
+keyD				equ		d'15'
 
-STATUS_TEMP equ     0x00
-W_TEMP      equ     0x01
-Counter		equ		0x02
+STATUS_TEMP			equ     0x00
+W_TEMP				equ     0x01
+Counter				equ		0x02
+Counter2			equ		0x03
+Temp				equ		0x04
 
 ; 0x20 to 0x27 for LCD
 
-delayReg	equ		0x30
-reg100us	equ		0x31
-reg50ms		equ		0x32
+delayReg			equ		0x30
+reg100us			equ		0x31
+reg50ms				equ		0x32
 
-KEY			equ		0x50
-KEY_Temp	equ		0x51
-KEY_ISR     equ     0x52
+KEY					equ		0x50
+TempKEY				equ		0x51
+KEY_ISR				equ     0x52
 
-InOperation equ     0x60
-TrayEncoder equ     0x61
-stepDelay1  equ     0x62
-stepDelay2  equ     0x63
-FL_count    equ     0x64
-PhotoInput  equ     0x65
+InOperation			equ     0x60
+TrayEncoder			equ     0x61
+stepDelay1			equ     0x62
+stepDelay2			equ     0x63
+FL_count			equ     0x64
+PhotoInput			equ     0x65
 
 ; 0x71 to 0x78 for RTC
 
-EEPROM_CLEAR	equ	0x79
-EEPROM_H    equ     0x80
-EEPROM_L    equ     0x81
-EEPROM_REG	equ		0x82
-LED_Count	equ		0x83
-SkipCount	equ		0x84
+EEPROM_CLEAR		equ		0x79
+EEPROM_H			equ		0x80
+EEPROM_L			equ		0x81
+EEPROM_REG			equ		0x82
+TempEEPROM_H		equ		0x83
+TempEEPROM_L		equ		0x84
+LED_Count			equ		0x85
+SkipCount			equ		0x86			; To count up to 3 for displaying ' '
+OpLogFinishCount	equ		0x87			; To stop after 9 EEPROM Reads
 
-RTC_Second  equ		0x90
-RTC_Minute  equ		0x91
-RTC_Hour    equ		0x92
-RTC_Day     equ		0x93
-RTC_Date    equ		0x94
-RTC_Month   equ		0x95
-RTC_Year    equ		0x96
-RTC_L       equ		0x97
-RTC_H       equ		0x98
-RTC_Second_Diff     equ 0x99
-RTC_Minute_Diff     equ 0x9A
+Op_Seconds			equ		0x90
+Op_Interrupts		equ		0x91
 
+InTransfer			equ		0xA0
+PCInter_PCL			equ		0xA1
+PCInter_PCLATH		equ		0xA2
+PCInter_PCLATU		equ		0xA3
+TIMCNT				equ		0xA4
+LPCNT				equ		0xA5
+TDATA				equ		0xA6
+
+    extern tens_digit, ones_digit
 
 ; ****************************************************************************
 ; MACROS
@@ -120,6 +133,34 @@ restContext macro
     movff   STATUS_TEMP, STATUS     ; restore STATUS last without affecting W
 			endm
 
+; Increment file as 2 digit BCD
+incf_BCD	macro		BCD
+	local	justones, end_incf_BCD
+	movff	BCD, Temp
+	; Process 1's digit BCD
+	movlw	0x0F
+	andwf	Temp					; Temp = lower nibble of BCD
+	movlw	d'9'
+	; If 1's is 9:
+	cpfseq	Temp					; Skip if 1's digit is 9
+	goto	justones				; Just increment lower nibble if 1's is less than 9
+	movlw	b'00010000'				; Increment 10's digit of BCD
+	addwf	BCD
+	movlw	0xF0					; Clear 1's digit of BCD
+	andwf	BCD
+	; Check 100:
+	movlw	0xA0
+	cpfslt	BCD						; If BCD's 10's digit is less than 100, skip
+	clrf	BCD						; If BCD's 10's digit is 100, clear everything
+	goto	end_incf_BCD
+	; If 1's is less than 9:
+justones
+	incf	BCD
+	goto	end_incf_BCD
+end_incf_BCD
+	nop
+			endm
+
 ; Delay 50xN milliseconds
 Delay50xNms macro	countReg, N
     local   Again
@@ -133,19 +174,20 @@ Again
 
 ; Write RTC Data
 WriteRTC	macro
-		movff		0x77, W
+		movff		tens_digit, WREG
 		call		WR_DATA
-		movff		0x78, W
+		movff		ones_digit, WREG
 		call		WR_DATA
 			endm
 
 ; Step Tray X Degrees
 XDegreeStep	macro	X
 		local	Again
-		movlw	X / StepSize
+		movlw	X
 		movwf	Counter
 Again
-		call	StepMotor
+		call	OneDegreeStep
+		incf	TrayEncoder
 		decfsz	Counter
 		goto	Again
 			endm
@@ -172,6 +214,7 @@ Again
 DispOpLog	macro	addrH, addrL
 		local		Again, P, OneF, TwoF, ThreeF, N, Write, Skip, WriteSkip, Finish
 		clrf		SkipCount
+		clrf		OpLogFinishCount
 		; Check if there is No Data first
 		ReadEEPROM	EEPROM_REG, addrH, addrL
 		movlw		0xFF
@@ -184,6 +227,8 @@ Again
 		movlw		d'3'
 		cpfslt		SkipCount
 		goto		Skip
+		cpfslt		OpLogFinishCount
+		goto		Finish
 		; Read EEPROM data
 		ReadEEPROM	EEPROM_REG, addrH, addrL
 		btfsc		EEPROM_REG, 7	; If bit 7 is (1) Finish
@@ -232,6 +277,7 @@ Write
 		goto		Again
 Skip
 		movlw		0x20			; ASCII ' '
+		incf		OpLogFinishCount
 		goto		WriteSkip
 WriteSkip
 		call		WR_DATA
@@ -282,18 +328,16 @@ ReadEEPROM  macro   file, addrH, addrL
 ChangeState	macro	KeyCode, NextState
 		local		Next, NotNext																		; Need this to bypass 'out of range' error
 		movlw		KeyCode			; If 'KeyCode' was pressed
-		subwf		KEY
-		bz			Next			; Go to 'NextState'
-		bra			NotNext
+		cpfseq		KEY
+		goto		NotNext
 Next								; Before going to the next state,                                 ; FIX THIS STUFF LATER WITH CPFSEQ
 		clrf		PORTA			; Clear all Pins
         clrf		PORTB
         clrf		PORTC
         clrf		PORTD
-        clrf        InOperation     ; Not in operation anymore
 		goto		NextState
 NotNext
-		movff		KEY_Temp, KEY	; Restore KEY for next check
+		nop
 			endm
 
 ; ****************************************************************************
@@ -306,34 +350,55 @@ NotNext
 	goto	ISR_HIGH
 
 	org		0x18				;low priority ISR
-	retfie
+	goto	ISR_LOW
 
 ; ****************************************************************************
 ; INTERRUPT SERVICE ROUTINE
 ; ****************************************************************************
 
 ISR_HIGH
-    saveContext
-    btfss   INTCON3, INT1IF        ; If KEYPAD interrupt, skip return
-    goto    END_ISR_HIGH
-
-    movlw   0xFF                ; If in operation, skip return
-    cpfseq  InOperation
-    goto    END_ISR_HIGH
-
-    swapf   PORTB, W            ; Read PORTB<7:4> into W<3:0>
-    andlw   0x0F
-    movwf   KEY_ISR            ; Put W into KEY_ISR
-    movlw   keyStar             ; Put keyStar into W to compare to KEY_ISR
-    cpfseq  KEY_ISR            ; If key was '*', skip return
-    goto    END_ISR_HIGH
-
-    clrf    TOSU                   ; Reset program counter
-    clrf    TOSH
-    clrf    TOSL
-
+	saveContext								; 3
+	; Reset Timer
+	movlw		TimerConstantH				; 1
+	movwf		TMR0H						; 1
+	movlw		TimerConstantL - 9			; 1
+	movwf		TMR0L						; 1
+	; TIMER INTERRUPT
+	btfss		INTCON, TMR0IF
+	goto		END_ISR_HIGH
+	; Increment as BCD interrupts and seconds
+	incf_BCD	Op_Interrupts
+	movlw		d'0'
+	cpfseq		Op_Interrupts				; Skip to seconds++ if interrupts is 0 after adding (100)
+	goto		END_ISR_HIGH				; Skip seconds++ if interrupts > 0 after adding (!= 100)
+	incf_BCD	Op_Seconds					
 END_ISR_HIGH
-    bcf     INTCON3, INT1IF        ; Clear flag for next interrupt
+	bcf			INTCON, TMR0IF
+	restContext
+	retfie
+
+ISR_LOW
+    saveContext
+	; KEYPAD INTERRUPT
+    btfss		INTCON3, INT1IF			; If KEYPAD interrupt, skip return
+    goto		END_ISR_LOW
+	; Check operation status
+    movlw		0xFF					; If in operation, skip return
+    cpfseq		InOperation
+    goto		END_ISR_LOW
+	; Process KEY
+    swapf		PORTB, W				; Read PORTB<7:4> into W<3:0>
+    andlw		0x0F
+    movwf		KEY_ISR					; Put W into KEY_ISR
+    movlw		keyStar					; Put keyStar into W to compare to KEY_ISR
+    cpfseq		KEY_ISR					; If key was '*', skip return
+    goto		END_ISR_LOW
+	; Reset program counter
+    clrf		TOSU
+    clrf		TOSH
+    clrf		TOSL
+END_ISR_LOW
+    bcf			INTCON3, INT1IF         ; Clear flag for next interrupt
     restContext
 	retfie
 
@@ -342,41 +407,38 @@ END_ISR_HIGH
 ; ****************************************************************************
 
 MainMenu_L1		db	"Standby", 0
-;MainMenu_L2		db	"1:30PM, 2/3/2014", 0
 Operation_L1	db	"In Operation...", 0
 Operation_L2	db	"*: Stop", 0
-OpLog_L1		db	"Oprtn. Time: ", 0
+SavingData		db	"Saving Data...", 0
+OpLog_L1		db	"Op. Time: ", 0
 OpLog_L2		db	"12:00PM, 2/3/14", 0
 OpLogDetails_L1	db	"#: 123 456 789", 0
 OpLogDetails_L2	db	"?: ", 0
-PermLog_L1		db	"Permanent Logs", 0
-PermLog_L2		db	"1  2  3  4", 0
-PermLog1_L1		db	"Permanent Log 1", 0
+PermLogMenu_L1	db	"Permanent Logs", 0
+PermLogMenu_L2	db	"1 ~ 9", 0
+PermLog_L1		db	"P. Log ", 0
 PCInter_L1		db	"PC Interface", 0
-PCInter_L2		db	"Connect to PC...", 0
-NoData			db	"No Data", 0
+PCInter_L2		db	"0: Start", 0
+PCTransfer_L1	db	"Transfering...", 0
+NoData			db	"N/A", 0
 
 ; ****************************************************************************
 ; MAIN PROGRAM
 ; ****************************************************************************
         CODE
 Init
-		; Clear first 15 bytes of EEPROM (MIGHT NOT NEED THIS...)										; SLIGHT BUG WITH THIS WHEN RESETTING DURING A RUN AFTER 1 SUCCESSFUL RUN (Save PCL AFTER THIS)
-		clrf		EEPROM_H
-		clrf		EEPROM_L
-		setf		EEPROM_CLEAR
-		clrf		Counter
 		; Setup I/O
         movlw       b'00110000'    ; Set PORTA<4:5> as input
         movwf       TRISA
         movlw       b'00000111'    ; Set PORTE<0:2> as input
         movwf       TRISE
-        movlw		b'11111111'		; Set required keypad inputs (RB0 is interrupt)
+        movlw		b'11111111'		; Set required keypad inputs (RB1 is interrupt)
         movwf		TRISB
-		movlw		b'00011000'
-		movwf		TRISC			; RC3, RC4 input for RTC
+		movlw		b'10011000'		; RC7: USART RC, RC6: USART TX
+		movwf		TRISC			; RC3, RC4: for RTC
+		movlw		b'00000001'
+		movwf		TRISD
 		; Clear Ports
-        clrf		TRISD          ; All port D is output
         clrf		LATA
         clrf		LATB
         clrf		LATC
@@ -385,19 +447,22 @@ Init
 		; Setup Peripherals
 		call		InitLCD
 		call		i2c_common_setup
+		call		InitUSART
+		movlw		b'00001000'			; No 16-bit, internal, no prescaler
+		movwf		T0CON
 		; Setup Interrupts
-        bcf         RCON, IPEN          ; Legacy mode interrupts
-        bsf         INTCON, GIE         ; Allow global interrupt
-        bsf         INTCON3, INT1IE     ; enable INT1 int flag bit on RB1
+		clrf		RCON
+		clrf		INTCON
+		clrf		INTCON2
+		clrf		INTCON3
+		bsf         RCON, IPEN          ; Priority mode interrupts
+        bsf         INTCON, GIEH        ; Allow global interrupt
+		bsf			INTCON, GIEL
         bsf         INTCON2, INTEDG1    ; set INTEDG1 to detect rising edge
-
-ClearNext
-		WriteEEPROM EEPROM_CLEAR, EEPROM_H, EEPROM_L
-		incf		Counter
-		incf		EEPROM_L
-		movlw		d'15'
-		cpfseq		Counter
-		goto		ClearNext
+		bsf			INTCON, TMR0IE
+		bsf			INTCON2, TMR0IP		; set TRM0IP to high priority
+        bsf         INTCON3, INT1IE     ; enable INT1 int flag bit on RB1
+		bcf			INTCON3, INT1IP		; set INT1IP to low priority
 		; Clear FSR
 		clrf		EEPROM_H			; Initialize EEPROM address
 		clrf		EEPROM_L
@@ -406,21 +471,28 @@ ClearNext
 		clrf		TrayEncoder
 		clrf		LED_Count
 		clrf		SkipCount
+		clrf		InOperation
+		clrf		Op_Seconds
+		clrf		Op_Interrupts
+		clrf		tens_digit
+		clrf		ones_digit
+		call		ClearEEPROM_21
 
 		; TEST OPLOG
 		bsf			LATE, 0
 		bsf			LATE, 1
 		bsf			LATE, 2
 
-		; SET UP RTC
-		rtc_resetAll
-		; 11:48PM, 12/31/2094
-		rtc_set 0x00, b'00000000'		; Set seconds to 0
-		rtc_set 0x01, b'01001000'		; Set minutes (48)
-		rtc_set	0x02, b'01110001'		; Set hours (11PM)
-		rtc_set 0x04, b'00110001'		; Set day (31)
-		rtc_set	0x05, b'00010010'		; Set month (12)
-		rtc_set 0x06, b'10010100'		; Set year (94)
+		bsf			LATA, 5
+
+		; SET UP RTC            11:30PM, 02/19/2014
+;		rtc_resetAll
+;		rtc_set 0x00, b'00000000'		; Set seconds to 0
+;		rtc_set 0x01, b'00110000'		; Set minutes (30)
+;		rtc_set	0x02, b'01110001'		; Set hours (11PM) (0, 12hour/24hour, PM/AM, 10hour)
+;		rtc_set 0x04, b'00011001'		; Set day (19)
+;		rtc_set	0x05, b'00000010'		; Set month (2)
+;		rtc_set 0x06, b'00010100'		; Set year (14)
 
 
 ; STANDBY STATE
@@ -437,30 +509,36 @@ Stay_Standby
 
 ; OPERATION STATE
 Operation
+		; Start Timer
+		movlw		TimerConstantH				; 1
+		movwf		TMR0H
+		movlw		TimerConstantL				; 1
+		movwf		TMR0L						; 1
+		bsf			T0CON, TMR0ON				; Turn on timer
+		call		ClearEEPROM_21
+		; Display
         setf        InOperation
 		call		ClrLCD
 		DispTable	Operation_L1
 		call		LCD_L2
 		DispTable	Operation_L2
-        clrf        FL_count                    ; Clear FL_count to 0
-
-        ;TESTING
-;        bsf         ArmSol
-;forever
-;        StepMotor
-;        goto        forever
-
-FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
-        btfss       BreakBeam
-        goto        FIND_FL
-		XDegreeStep 1
-        goto        FIND_FIRST_FL
+		; Initialize variables for new operation
+		clrf		FL_count
+		clrf		Op_Seconds
+		clrf		Op_Interrupts
+		clrf		TrayEncoder
+;FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
+;        btfss       BreakBeam
+;        goto        FIND_FL
+;		XDegreeStep 1
+;        goto        FIND_FIRST_FL
 
 FIND_FL
-        btfss       BreakBeam                   ; Do nothing if beam is not broken (1)
+        btfss       BreakBeam                   ; Skip if beam is not broken (1)
         goto        FOUND_FL                    ; If beam is broken (0) go to FOUND_FL
-        dcfsnz      TrayEncoder                 ; Do nothing is tray encoder is not(0)
-        goto        NO_MORE_FL                  ; If trayEncoder counted 50 degrees (0) go to NO_MORE_FL
+		movlw		d'50'
+        cpfslt      TrayEncoder                 ; Skip if TrayEncoder < 50
+        goto        NO_MORE_FL                  ; If TrayEncoder == 50 go to NO_MORE_FL
 		XDegreeStep 1
         goto        FIND_FL
 
@@ -496,25 +574,104 @@ NO_MORE_FL
         movlw       9                           ; Don't exit if under 9 count
         cpfslt      FL_count
         goto        EXIT_OP                     ; Exit if FL_count is 9
+		goto		NO_MORE_FL
 
 EXIT_OP
-			;Stop Timer
-        goto        OpLog
+		;Stop Timer
+		bcf			T0CON, TMR0ON
+		WriteEEPROM	Op_Seconds,	EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		WriteEEPROM	Op_Interrupts, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		; Take RTC Data
+		rtc_read	0x02						; Hours
+		call		WriteEEPROM_RTC
+		rtc_read	0x01						; Minutes
+		call		WriteEEPROM_RTC
+		rtc_read	0x05						; Month
+		call		WriteEEPROM_RTC
+		rtc_read	0x04						; Day
+		call		WriteEEPROM_RTC
+		rtc_read	0x06						; Year
+		call		WriteEEPROM_RTC
+		; Clear InOperation flag to stop '*' interrupts
+		clrf		InOperation
+        goto        SaveData
 
-Stay_Operation
-		call		ReadKEY						; Wait for key inputs
-		ChangeState	keyStar, Standby			; * for Back (Standby)
-		bra			Stay_Operation
-
+; SAVE DATA STATE
+SaveData
+		call		ClrLCD
+		DispTable	SavingData
+		movlf		d'0', EEPROM_H
+		movlf		LastPermLog, EEPROM_L
+		movlf		d'0', TempEEPROM_H
+		movlf		TempEEPROM_L_Const, TempEEPROM_L
+		clrf		Counter2
+		clrf		Counter
+ShiftLoop
+		incf		Counter
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movlw		d'21'
+		addwf		EEPROM_L
+		WriteEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movlw		d'20'
+		subwf		EEPROM_L
+		movlw		d'21'
+		cpfseq		Counter
+		goto		ShiftLoop
+	; Move a run (21 bytes) to TempEEPROM
+;SaveTempLoop
+;		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+;		WriteEEPROM	EEPROM_REG, TempEEPROM_H, TempEEPROM_L
+;		incf		EEPROM_L
+;		incf		TempEEPROM_L
+;		incf		Counter
+;		movlw		d'21'
+;		cpfseq		Counter						; Keep looping until all 21 bytes are moved to Temp
+;		goto		SaveTempLoop
+;	; Move TempEEPROM to the next 21 byte block in EEPROM run data
+;		movlf		TempEEPROM_L_Const, TempEEPROM_L
+;		clrf		Counter
+;TempShiftLoop
+;		ReadEEPROM	EEPROM_REG, TempEEPROM_H, TempEEPROM_L
+;		WriteEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+;		incf		EEPROM_L
+;		incf		TempEEPROM_L
+;		incf		Counter
+;		movlw		d'21'
+;		cpfseq		Counter
+;		goto		TempShiftLoop
+	; Set EEPROM address to the previous 21 byte block, and reset TempEEPROM address
+		movlw		d'42'
+		subwf		EEPROM_L
+		movlf		TempEEPROM_L_Const, TempEEPROM_L
+		clrf		Counter
+		incf		Counter2
+		movlw		d'9'
+		cpfseq		Counter2					; Skip if 9 shifts were made
+		goto		ShiftLoop
+	; Finish Saving Data
+		goto		OpLog
+		
 ; OPERATION LOG STATE
 OpLog
 		call		ClrLCD
 		DispTable	OpLog_L1
+		; Display Op Time for most recent run
+		movlw		d'9'
+		movwf		EEPROM_L
+		ReadEEPROM	Op_Seconds, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		ReadEEPROM	Op_Interrupts, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		call		DispOpTime
+		; Display Op RTC
 		call		LCD_L2
-		DispTable	OpLog_L2
+		clrf		EEPROM_L
+		call		DispOpRTC
 Stay_OpLog
 		call		ReadKEY
-		ChangeState	key1, OpLogDetails
+		ChangeState	key0, OpLogDetails
 		ChangeState keyStar, Standby
 		bra			Stay_OpLog
 OpLogDetails
@@ -533,44 +690,104 @@ StayOpLogDetails
 ; PERMANENT LOG STATE
 PermLogMenu
 		call		ClrLCD
-		DispTable	PermLog_L1
+		DispTable	PermLogMenu_L1
 		call LCD_L2
-		DispTable	PermLog_L2
+		DispTable	PermLogMenu_L2
 Stay_PermLogMenu
 		call		ReadKEY
-		ChangeState	key1, PermLog1
+		ChangeState	key1, PermLog
+		ChangeState	key2, PermLog
+		ChangeState	key3, PermLog
+		ChangeState	key4, PermLog
+		ChangeState	key5, PermLog
+		ChangeState	key6, PermLog
+		ChangeState	key7, PermLog
+		ChangeState	key8, PermLog
+		ChangeState	key9, PermLog
 		ChangeState keyStar, Standby
 		bra			Stay_PermLogMenu
-PermLog1
+PermLog
 		call		ClrLCD
-		DispTable	PermLog1_L1
-		call LCD_L2
-		DispTable	OpLog_L2
-Stay_PermLog1
+		DispTable	PermLog_L1
+		; Check if * was pressed from details, which means skip N calculation
+		movlw		keyStar
+		cpfslt		KEY									; Skip if 1~9 was pressed
+		goto		BackFromDetails
+		; Find N, the actual key number
+		movff		KEY, WREG
+		incf		WREG								; W = KEY+1
+		movwf		Temp								; Temp = KEY+1
+		rrncf		WREG								; W = (KEY+1) / 4
+		bcf			WREG, 7
+		rrncf		WREG
+		bcf			WREG, 7
+		subwf		Temp								; N = Temp = (KEY+1) - (KEY+1) / 4
+		movff		Temp, WREG							; W = N
+		movff		Temp, TempKEY
+		mullw		d'21'								; PRODL = 21 x N (No PRODH since N can go up to 9 only)
+BackFromDetails
+		; Display N
+		movff		TempKEY, WREG
+		addlw		0x30
+		call		WR_DATA
+		movlw		":"
+		call		WR_DATA
+		movlw		" "
+		call		WR_DATA
+		; Display OpTime
+		movff		PRODL, EEPROM_L						; Set EEPROM to N x 21
+		movlw		d'9'
+		addwf		EEPROM_L
+		ReadEEPROM	Op_Seconds, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		ReadEEPROM	Op_Interrupts, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		call		DispOpTime
+		movff		PRODL, EEPROM_L						; Reset EEPROM to beginning of run (N x 21)
+		; Display OpRTC
+		call		LCD_L2
+		movff		PRODL, EEPROM_L
+		call		DispOpRTC
+Stay_PermLog
 		call		ReadKEY
-		ChangeState	key1, PermLog1Details
+		ChangeState	key0, PermLogDetails
 		ChangeState keyStar, PermLogMenu
-		bra			Stay_PermLog1
-PermLog1Details
+		bra			Stay_PermLog
+PermLogDetails
 		call		ClrLCD
 		DispTable	OpLogDetails_L1
 		call LCD_L2
 		DispTable	OpLogDetails_L2
-Stay_PermLog1Details
+		movff		PRODL, EEPROM_L						; Reset EEPROM to beginning of run
+		DispOpLog	EEPROM_H, EEPROM_L
+Stay_PermLogDetails
 		call		ReadKEY
-		ChangeState keyStar, PermLog1
-		bra			Stay_PermLog1Details
+		ChangeState keyStar, PermLog
+		bra			Stay_PermLogDetails
 
 ; PC INTERFACE STATE
 PCInter
-	call ClrLCD
-	DispTable	PCInter_L1
-	call LCD_L2
-	DispTable	PCInter_L2
+		movff		PCL, PCInter_PCL					; Save PCL for '*' interrupt
+		movff		PCLATH, PCInter_PCLATH
+		movff		PCLATU,	PCInter_PCLATU
+		call		ClrLCD
+		DispTable	PCInter_L1
+		call		LCD_L2
+		DispTable	PCInter_L2
 Stay_PCInter
-	call		ReadKEY
-	ChangeState	keyStar, Standby
-	bra			Stay_PCInter
+		call		ReadKEY
+		ChangeState	key0, PCTransfer
+		ChangeState	keyStar, Standby
+		bra			Stay_PCInter
+PCTransfer
+		setf		InTransfer							; Set InTransfer flag for '*' interrupt
+		call		ClrLCD
+		DispTable	PCTransfer_L1
+		call		LCD_L2
+		DispTable	Operation_L2
+		call		SendDataUSART
+		clrf		InTransfer
+		bra			PCInter
 
 
 ; ****************************************************************************
@@ -598,6 +815,118 @@ loop50ms
 		 call		Delay100us		; 497 cycles
 		 return						; 2 cycles
 
+; DISPLAY SUBROUTINES
+DispOpTime
+		; Display 'No Data' if there was no stored time
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movlw		0xFF
+		cpfseq		EEPROM_REG
+		goto		NoSkipDispOpTime
+		DispTable	NoData
+		movlw		0xFF
+		cpfslt		EEPROM_REG
+		goto		SkipDispOpTime
+NoSkipDispOpTime
+		; 10's seconds
+		swapf		Op_Seconds, W				; Swap and mask upper nibble of Op_Seconds
+		movwf		Temp
+		movlw		0x0F
+		andwf		Temp						; Temp = upper nibble of Op_Seconds
+		movff		Temp, WREG					; W = Temp
+		addlw		0x30						; Convert to ASCII
+		call		WR_DATA
+		; 1's seconds
+		movff		Op_Seconds, Temp			; Mask lower nibble of Op_Seconds
+		movlw		0x0F
+		andwf		Temp						; Temp = lower nibble of Op_Seconds
+		movff		Temp, WREG					; W = Temp
+		addlw		0x30						; Convert to ASCII
+		call		WR_DATA
+		; Write '.'
+		movlw		0x2E
+		call		WR_DATA
+		; .1's seconds
+		swapf		Op_Interrupts, W			; Swap and mask upper nibble of Op_Interrupts
+		movwf		Temp
+		movlw		0x0F
+		andwf		Temp						; Temp = upper nibble of Op_Interrupts
+		movff		Temp, WREG					; W = Temp
+		addlw		0x30						; Convert to ASCII
+		call		WR_DATA
+		; Write 's'
+		movlw		0x73
+		call		WR_DATA
+		call		LCD_L2
+SkipDispOpTime
+		return
+
+DispOpRTC
+		; Initiate EEPROM_L
+		movlw		d'11'
+		addwf		EEPROM_L
+		; Display 'No Data' if there was no stored time
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movlw		0xFF
+		cpfseq		EEPROM_REG
+		goto		NoSkipDispOpRTC
+		DispTable	NoData
+		movlw		0xFF
+		cpfslt		EEPROM_REG
+		goto		SkipDispOpRTC
+NoSkipDispOpRTC
+		; Hour
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movff		EEPROM_REG, WREG
+        andlw       b'11110001'
+		call		WR_DATA
+		incf		EEPROM_L
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movff		EEPROM_REG, WREG
+		call		WR_DATA
+		incf		EEPROM_L
+		; Print ':'
+		movlw		":"
+		call		WR_DATA
+		; Minute
+		call DispOpRTC_Helper
+        ; AM/PM
+        movlw       d'4'
+        subwf       EEPROM_L
+        ReadEEPROM  EEPROM_REG, EEPROM_H, EEPROM_L
+        movlw       "P"
+        btfss       EEPROM_REG, 1
+        movlw       "A"
+        call        WR_DATA
+        movlw       "M"
+        call        WR_DATA
+        movlw       d'4'
+        addwf       EEPROM_L
+		; Print ' '
+		movlw		" "
+		call		WR_DATA
+		; Month
+		call DispOpRTC_Helper
+		; Print '/'
+		movlw		"/"
+		call		WR_DATA
+		; Day
+		call DispOpRTC_Helper
+		; Print '/'
+		movlw		"/"
+		call		WR_DATA
+		call DispOpRTC_Helper
+SkipDispOpRTC
+		return
+DispOpRTC_Helper
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movff		EEPROM_REG, WREG
+		call		WR_DATA
+		incf		EEPROM_L
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movff		EEPROM_REG, WREG
+		call		WR_DATA
+		incf		EEPROM_L
+		return
 
 ; DATA SUBROUTINES
 PhotoData                                       ; CALLED FROM FOUND_FL
@@ -614,6 +943,29 @@ NoPhotoData
         WriteEEPROM PhotoInput, EEPROM_H, EEPROM_L
         incf		EEPROM_L
         return
+
+WriteEEPROM_RTC
+		WriteEEPROM	tens_digit, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		WriteEEPROM ones_digit, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		return
+
+ClearEEPROM_21
+		clrf		EEPROM_H
+		clrf		EEPROM_L
+		setf		EEPROM_CLEAR
+		clrf		Counter
+ClearNext
+		WriteEEPROM EEPROM_CLEAR, EEPROM_H, EEPROM_L
+		incf		Counter
+		incf		EEPROM_L
+		movlw		d'21'
+		cpfseq		Counter
+		goto		ClearNext
+		clrf		EEPROM_H				; reset EEPROMaddr
+		clrf		EEPROM_L
+		return
 
 ; STEPPER MOTOR SUBROUTINES
 Step1
@@ -662,6 +1014,15 @@ StepMotor
         call        StepDelay
 		return
 
+OneDegreeStep
+		movlw	d'1'; / StepSize / GearRatio
+		movwf	Counter2
+OneDegreeStepLoop
+		call	StepMotor
+		decfsz	Counter2
+		goto	OneDegreeStepLoop
+		return
+
 ; Turn Gripper Subroutines
 TurnGripCW
 		bsf			GripMotorCW
@@ -683,7 +1044,6 @@ WaitKey
         swapf		PORTB,W     ;Read PortB<7:4> into W<3:0>
 		andlw		0x0F		;Mask 00001111
 		movwf		KEY			;Save result in KEY
-		movwf		KEY_Temp
 		btfsc		PORTB,1     ;Wait until key is released
         goto		$-2			;Back 1 instruction
 		return
@@ -694,14 +1054,29 @@ WaitKeyRTC
 		call		LCD_L2
 		; Display hours
 		rtc_read	0x02
-		WriteRTC
-		movlw		0x3A		;ASCII ':'
+		movf        tens_digit, W
+        andlw       b'00000001'
+        addlw       0x30
+        call        WR_DATA
+        movf        ones_digit, W
+        call        WR_DATA
+		movlw		":"
 		call		WR_DATA
 		; Dispay minutes
 		rtc_read	0x01
 		WriteRTC
-		movlw		0x20		;ASCII ' '
-		call		WR_DATA
+		; Dispay AM/PM
+		rtc_read	0x02
+        movlw       "P"
+        btfss       tens_digit, 1
+        movlw       "A"
+        call        WR_DATA
+        movlw       "M"
+        call        WR_DATA
+		movlw		" "
+        call        WR_DATA
+
+
 		; Display month
 		rtc_read	0x05
 		WriteRTC
@@ -713,10 +1088,6 @@ WaitKeyRTC
 		movlw		0x2F		; ASCII '/'
 		call		WR_DATA
 		; Display year
-		movlw		0x32		; ASCII '2'
-		call		WR_DATA
-		movlw		0x30		; ASCII '0'
-		call		WR_DATA
 		rtc_read	0x06
 		WriteRTC
 		;Process KEY
@@ -725,9 +1096,50 @@ WaitKeyRTC
         swapf		PORTB,W     ;Read PortB<7:4> into W<3:0>
 		andlw		0x0F		;Mask 00001111
 		movwf		KEY			;Save result in KEY
-		movwf		KEY_Temp
 		btfsc		PORTB,1     ;Wait until key is released
         goto		$-2			;Back 1 instruction
+		return
+
+; USART SUBROUTINES
+InitUSART
+		MOVLW	15				;Baud rate 9600, assuming 10MHz oscillator
+		MOVWF	SPBRG
+		clrf	TXSTA			;8 bits data, no parity, 1 stop
+
+		CLRF	RCSTA
+		BSF		RCSTA,SPEN		;enable single receive
+		BSF		RCSTA,CREN		;continuous
+
+		BSF		TXSTA,TXEN		;enable tx
+		return
+
+SendDataUSART
+		local	Again
+		movlf		d'21', EEPROM_L	; Set EEPROM_L to beginning of Permanent Log
+		; Write Transfer Time/Date
+;		movlw	upper TableVar	; Move Table<20:16> into TBLPTRU
+;		movwf	TBLPTRU
+;		movlw	high TableVar	; Move Table<15:8> into TBLPTRH
+;		movwf	TBLPTRH
+;		movlw	low TableVar	; Move Table<7:0> into TBLPTRL
+;		movwf	TBLPTRL
+;		tblrd*					; Read byte at TBLPTR and copy to TABLAT
+;		movf	TABLAT, W		; Move byte into W
+;Again
+;		call	WR_DATA			; Write byte to LCD
+;		tblrd+*					; Increment pointer
+;		movf	TABLAT, W		; Move new byte into W
+;		bnz		Again			; Keep going until the end (0 byte)
+SendUSARTLoop
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		movf		EEPROM_REG, W	;Load EEPROM_REG into W
+		movwf		TXREG			;Send it over RS232
+        btfss		TXSTA,1        ; check TRMT bit in TXSTA (FSR) until TRMT=1
+        goto		$-2
+		movlw		d'21' * 10
+		cpfseq		EEPROM_L
+		goto		SendUSARTLoop
 		return
 
 	END
