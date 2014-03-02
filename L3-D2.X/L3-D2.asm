@@ -23,30 +23,35 @@
 ; ****************************************************************************
 ; CONSTANT DEFINES
 ; ****************************************************************************
-#define     BreakBeam           PORTA, 5
-#define     Photo1              PORTE, 0
-#define     Photo2              PORTE, 1
-#define     Photo3              PORTE, 2
-#define		ArmSol              LATC, 5
-#define     GripSol             LATC, 2
-#define		GripMotorCW			LATC, 1
-#define		GripMotorCCW		LATC, 0
+
+#define		ArmSol              LATD, 0
+#define     GripSol             LATD, 1
+
+#define     BreakBeam           PORTC, 5
+
+#define     Photo3              PORTC, 2
+#define     Photo2              PORTC, 1
+#define     Photo1              PORTC, 0
+
 #define     Step1a              LATA, 0
 #define     Step1b              LATA, 1
 #define     Step2a              LATA, 2
 #define     Step2b              LATA, 3
+#define		GripMotorCCW        LATA, 4
+#define		GripMotorCW			LATA, 5
+
 #define		TimerConstantH		0x9E			; 2^16 - 25000
 #define		TimerConstantL		0x58
 ; Permanent Log Controls
 #define		TempEEPROM_L_Const	d'220'
 #define		LastPermLog			d'168'
 ; Stepper Controls
-#define		StepSize			0x01
-#define		GearRatio			d'4'
-#define     StepDelayVal        0x03
+#define     StepDelayVal        0x1F
 ; Operation Controls
-#define		OpDelay				d'1'
-#define		GripMotorDelay		d'1'
+#define		OpDelay				d'10'
+#define     TrayStep            d'25'           ; 20 degrees = 25 * 0.83
+#define     MaxTrayStep         d'60'
+#define		GripMotorDelay		d'10'
 
 key1				equ		d'0'
 key2				equ		d'1'
@@ -88,8 +93,6 @@ stepDelay2			equ     0x63
 FL_count			equ     0x64
 PhotoInput			equ     0x65
 
-; 0x71 to 0x78 for RTC
-
 EEPROM_CLEAR		equ		0x79
 EEPROM_H			equ		0x80
 EEPROM_L			equ		0x81
@@ -110,6 +113,8 @@ PCInter_PCLATU		equ		0xA3
 TIMCNT				equ		0xA4
 LPCNT				equ		0xA5
 TDATA				equ		0xA6
+
+; 0xB0 and onwards for RTC
 
     extern tens_digit, ones_digit
 
@@ -428,15 +433,15 @@ NoData			db	"N/A", 0
         CODE
 Init
 		; Setup I/O
-        movlw       b'00110000'    ; Set PORTA<4:5> as input
+        movlw       b'00000000'
         movwf       TRISA
-        movlw       b'00000111'    ; Set PORTE<0:2> as input
+        movlw       b'00000111'
         movwf       TRISE
         movlw		b'11111111'		; Set required keypad inputs (RB1 is interrupt)
         movwf		TRISB
-		movlw		b'10011000'		; RC7: USART RC, RC6: USART TX
+		movlw		b'10011111'		; RC7: USART RC, RC6: USART TX
 		movwf		TRISC			; RC3, RC4: for RTC
-		movlw		b'00000001'
+		movlw		b'00011000'
 		movwf		TRISD
 		; Clear Ports
         clrf		LATA
@@ -444,6 +449,7 @@ Init
         clrf		LATC
         clrf		LATD
 		clrf		LATE
+        clrf        PORTC
 		; Setup Peripherals
 		call		InitLCD
 		call		i2c_common_setup
@@ -477,13 +483,6 @@ Init
 		clrf		tens_digit
 		clrf		ones_digit
 		call		ClearEEPROM_21
-
-		; TEST OPLOG
-		bsf			LATE, 0
-		bsf			LATE, 1
-		bsf			LATE, 2
-
-		bsf			LATA, 5
 
 		; SET UP RTC            11:30PM, 02/19/2014
 ;		rtc_resetAll
@@ -536,7 +535,7 @@ Operation
 FIND_FL
         btfss       BreakBeam                   ; Skip if beam is not broken (1)
         goto        FOUND_FL                    ; If beam is broken (0) go to FOUND_FL
-		movlw		d'50'
+		movlw		MaxTrayStep
         cpfslt      TrayEncoder                 ; Skip if TrayEncoder < 50
         goto        NO_MORE_FL                  ; If TrayEncoder == 50 go to NO_MORE_FL
 		XDegreeStep 1
@@ -551,21 +550,69 @@ FOUND_FL
         bsf         GripSol                     ; Pull grip in
 		Delay50xNms	delayReg, OpDelay			; Delay
         call        TurnGripCW                  ; Turn grip CW
+		Delay50xNms	delayReg, OpDelay			; Delay
         ; TAKE DATA FROM PHOTO SENSORS
         call        PhotoData
-		Delay50xNms	delayReg, OpDelay			; Delay 350ms
-        ; TURN OFF LED
+        ; Check if FL was '3 FAIL' and try to turn FL on again if that was the case
+        movlw       b'00001000'
+        cpfsgt      PhotoInput
+        goto        ON_AGAIN                    ; Skip if any LED was on
+        goto        TURN_OFF_FL
+ON_AGAIN
+        bcf         GripSol
+		Delay50xNms	delayReg, OpDelay			; Delay
+        bcf         ArmSol
+		Delay50xNms	delayReg, OpDelay			; Delay
+        call        TurnGripCCW
+		Delay50xNms	delayReg, OpDelay			; Delay
+        bsf         ArmSol
+		Delay50xNms	delayReg, OpDelay			; Delay
+        bsf         GripSol
+		Delay50xNms	delayReg, OpDelay			; Delay
+        call        TurnGripCW
+		Delay50xNms	delayReg, OpDelay			; Delay
+        call        RePhotoData                 ; Retake PhotoData once before turning off
+TURN_OFF_FL
         call        TurnGripCCW                 ; Turn grip CCW
 		Delay50xNms	delayReg, OpDelay			; Delay
         bcf         GripSol                     ; Release grip
 		Delay50xNms	delayReg, OpDelay			; Delay
         bcf         ArmSol                      ; Release arm
-		Delay50xNms	delayReg, OpDelay			;	---->											; TAKE THIS OUT LATER, FOR TESTING RIGHT NOW
+		Delay50xNms	delayReg, OpDelay
+        clrf        Counter
+OFF_AGAIN
+        ; CHECK IF FL IS OFF, or tried to turn off 2 more times already
+        movlw       d'2'
+        cpfslt      Counter
+        goto        FL_IS_OFF                   ; Skip if Counter is 2
+        btfsc       Photo3
+        goto        FL_IS_OFF
+        btfsc       Photo2
+        goto        FL_IS_OFF
+        btfsc       Photo1
+        goto        FL_IS_OFF
+        ; IF NOT TRY TURNING OFF AGAIN
+        call        TurnGripCCW
+        Delay50xNms	delayReg, OpDelay
+        bsf         ArmSol
+        Delay50xNms	delayReg, OpDelay
+        bsf         GripSol
+        Delay50xNms	delayReg, OpDelay
+        call        TurnGripCW
+        Delay50xNms	delayReg, OpDelay
+        bcf         GripSol
+        Delay50xNms	delayReg, OpDelay
+        bcf         ArmSol
+        Delay50xNms	delayReg, OpDelay
+        incf        Counter
+        goto        OFF_AGAIN
+FL_IS_OFF
+        clrf        Counter
         ; CHECK EXIT CONDITIONS
         movlw       9                           ; Don't exit if under 9 count
         cpfslt      FL_count					; Skip if less than 9 FL counted
         goto        EXIT_OP                     ; Exit if FL_count is 9
-		XDegreeStep	20
+		XDegreeStep	TrayStep
         goto        FIND_FL                     ; Keep looking for FL if under 9 count
 
 NO_MORE_FL
@@ -929,13 +976,23 @@ DispOpRTC_Helper
 		return
 
 ; DATA SUBROUTINES
-PhotoData                                       ; CALLED FROM FOUND_FL
-        movff       LATE, PhotoInput           ; Take input from photo sensors
-        bsf         PhotoInput, 3               ; Set 1 for break beam since FL was found
+PhotoData                                           ; CALLED FROM FOUND_FL
+        movff       PORTC, PhotoInput               ; Take input from photo sensors
+        bsf         PhotoInput, 3                   ; Set 1 for break beam since FL was found
         movlw       b'00001111'
         andwf       PhotoInput
         WriteEEPROM PhotoInput, EEPROM_H, EEPROM_L
         incf		EEPROM_L
+        return
+
+RePhotoData
+        movff       PORTC, PhotoInput
+        bsf         PhotoInput, 3
+        movlw       b'00001111'
+        andwf       PhotoInput
+        decf        EEPROM_L
+        WriteEEPROM PhotoInput, EEPROM_H, EEPROM_L
+        incf        EEPROM_L
         return
 
 NoPhotoData
@@ -1014,8 +1071,8 @@ StepMotor
         call        StepDelay
 		return
 
-OneDegreeStep
-		movlw	d'1'; / StepSize / GearRatio
+OneDegreeStep ; Actually 0.83 degrees
+		movlw	d'1'
 		movwf	Counter2
 OneDegreeStepLoop
 		call	StepMotor
