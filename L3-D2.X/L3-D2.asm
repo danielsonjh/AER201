@@ -48,10 +48,12 @@
 ; Stepper Controls
 #define     StepDelayVal        0x1F
 ; Operation Controls
-#define		OpDelay				d'10'
-#define     TrayStep            d'25'           ; 20 degrees = 25 * 0.83
-#define     MaxTrayStep         d'60'
-#define		GripMotorDelay		d'10'
+#define		OpDelay				d'8'
+#define     TrayStep            d'8'            ; 26.6 degrees = 8 * 0.83077 * 4
+#define     MaxTrayStep         d'15'           ; 49.8 degrees
+#define		GripMotorDelay		d'100'          ; GripMotorDelay X 2ms
+#define     GripMotorOn         d'5'
+#define     GripMotorOff        d'15'
 
 key1				equ		d'0'
 key2				equ		d'1'
@@ -441,13 +443,14 @@ Init
         movwf		TRISB
 		movlw		b'10011111'		; RC7: USART RC, RC6: USART TX
 		movwf		TRISC			; RC3, RC4: for RTC
-		movlw		b'00011000'
+		movlw		b'00000000'
 		movwf		TRISD
 		; Clear Ports
         clrf		LATA
         clrf		LATB
         clrf		LATC
         clrf		LATD
+        clrf        PORTD
 		clrf		LATE
         clrf        PORTC
 		; Setup Peripherals
@@ -553,61 +556,61 @@ FOUND_FL
 		Delay50xNms	delayReg, OpDelay			; Delay
         ; TAKE DATA FROM PHOTO SENSORS
         call        PhotoData
-        ; Check if FL was '3 FAIL' and try to turn FL on again if that was the case
-        movlw       b'00001000'
-        cpfsgt      PhotoInput
-        goto        ON_AGAIN                    ; Skip if any LED was on
-        goto        TURN_OFF_FL
-ON_AGAIN
-        bcf         GripSol
-		Delay50xNms	delayReg, OpDelay			; Delay
-        bcf         ArmSol
-		Delay50xNms	delayReg, OpDelay			; Delay
-        call        TurnGripCCW
-		Delay50xNms	delayReg, OpDelay			; Delay
-        bsf         ArmSol
-		Delay50xNms	delayReg, OpDelay			; Delay
-        bsf         GripSol
-		Delay50xNms	delayReg, OpDelay			; Delay
-        call        TurnGripCW
-		Delay50xNms	delayReg, OpDelay			; Delay
-        call        RePhotoData                 ; Retake PhotoData once before turning off
-TURN_OFF_FL
+;        ; Check if FL was '3 FAIL' and try to turn FL on again if that was the case
+;        movlw       b'00001000'
+;        cpfsgt      PhotoInput
+;        goto        ON_AGAIN                    ; Skip if any LED was on
+;        goto        TURN_OFF_FL
+;ON_AGAIN
+;        bcf         GripSol
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        bcf         ArmSol
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        call        TurnGripCCW
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        bsf         ArmSol
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        bsf         GripSol
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        call        TurnGripCW
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        call        RePhotoData                 ; Retake PhotoData once before turning off
+;TURN_OFF_FL
         call        TurnGripCCW                 ; Turn grip CCW
 		Delay50xNms	delayReg, OpDelay			; Delay
         bcf         GripSol                     ; Release grip
 		Delay50xNms	delayReg, OpDelay			; Delay
         bcf         ArmSol                      ; Release arm
 		Delay50xNms	delayReg, OpDelay
-        clrf        Counter
-OFF_AGAIN
-        ; CHECK IF FL IS OFF, or tried to turn off 2 more times already
-        movlw       d'2'
-        cpfslt      Counter
-        goto        FL_IS_OFF                   ; Skip if Counter is 2
-        btfsc       Photo3
-        goto        FL_IS_OFF
-        btfsc       Photo2
-        goto        FL_IS_OFF
-        btfsc       Photo1
-        goto        FL_IS_OFF
-        ; IF NOT TRY TURNING OFF AGAIN
-        call        TurnGripCCW
-        Delay50xNms	delayReg, OpDelay
-        bsf         ArmSol
-        Delay50xNms	delayReg, OpDelay
-        bsf         GripSol
-        Delay50xNms	delayReg, OpDelay
-        call        TurnGripCW
-        Delay50xNms	delayReg, OpDelay
-        bcf         GripSol
-        Delay50xNms	delayReg, OpDelay
-        bcf         ArmSol
-        Delay50xNms	delayReg, OpDelay
-        incf        Counter
-        goto        OFF_AGAIN
-FL_IS_OFF
-        clrf        Counter
+;        clrf        Counter
+;OFF_AGAIN
+;        ; CHECK IF FL IS OFF, or tried to turn off 2 more times already
+;        movlw       d'2'
+;        cpfslt      Counter
+;        goto        FL_IS_OFF                   ; Skip if Counter is 2
+;        btfsc       Photo3
+;        goto        FL_IS_OFF
+;        btfsc       Photo2
+;        goto        FL_IS_OFF
+;        btfsc       Photo1
+;        goto        FL_IS_OFF
+;        ; IF NOT TRY TURNING OFF AGAIN
+;        call        TurnGripCCW
+;        Delay50xNms	delayReg, OpDelay
+;        bsf         ArmSol
+;        Delay50xNms	delayReg, OpDelay
+;        bsf         GripSol
+;        Delay50xNms	delayReg, OpDelay
+;        call        TurnGripCW
+;        Delay50xNms	delayReg, OpDelay
+;        bcf         GripSol
+;        Delay50xNms	delayReg, OpDelay
+;        bcf         ArmSol
+;        Delay50xNms	delayReg, OpDelay
+;        incf        Counter
+;        goto        OFF_AGAIN
+;FL_IS_OFF
+;        clrf        Counter
         ; CHECK EXIT CONDITIONS
         movlw       9                           ; Don't exit if under 9 count
         cpfslt      FL_count					; Skip if less than 9 FL counted
@@ -1081,17 +1084,60 @@ OneDegreeStepLoop
 		return
 
 ; Turn Gripper Subroutines
+;TurnGripCW
+;		bsf			GripMotorCW
+;		Delay50xNms	delayReg, GripMotorDelay
+;		bcf			GripMotorCW
+;        return
+;
+;TurnGripCCW
+;		bsf			GripMotorCCW
+;		Delay50xNms	delayReg, GripMotorDelay
+;		bcf			GripMotorCCW
+;        return
+
 TurnGripCW
+        movlf       GripMotorDelay, delayReg
+TurnGripCW_START
+        dcfsnz      delayReg
+        goto        END_TurnGripCW
+        movlf       GripMotorOn, Counter
+TurnGripCW_ON
 		bsf			GripMotorCW
-		Delay50xNms	delayReg, GripMotorDelay
-		bcf			GripMotorCW
+		call        Delay100us
+        decfsz      Counter
+        goto        TurnGripCW_ON
+        movlf       GripMotorOff, Counter
+TurnGripCW_OFF
+        bcf         GripMotorCW
+        call        Delay100us
+        decfsz      Counter
+        goto        TurnGripCW_OFF
+        goto        TurnGripCW_START
+END_TurnGripCW
         return
 
 TurnGripCCW
+        movlf       GripMotorDelay, delayReg
+TurnGripCCW_START
+        dcfsnz      delayReg
+        goto        END_TurnGripCCW
+        movlf       GripMotorOn, Counter
+TurnGripCCW_ON
 		bsf			GripMotorCCW
-		Delay50xNms	delayReg, GripMotorDelay
-		bcf			GripMotorCCW
+		call        Delay100us
+        decfsz      Counter
+        goto        TurnGripCCW_ON
+        movlf       GripMotorOff, Counter
+TurnGripCCW_OFF
+        bcf         GripMotorCCW
+        call        Delay100us
+        decfsz      Counter
+        goto        TurnGripCCW_OFF
+        goto        TurnGripCCW_START
+END_TurnGripCCW
         return
+
 
 ; Read Keypad Input
 ReadKEY
