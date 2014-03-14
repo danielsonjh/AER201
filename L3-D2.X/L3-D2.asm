@@ -27,7 +27,7 @@
 #define		ArmSol              LATD, 0
 #define     GripSol             LATD, 1
 
-#define     BreakBeam           PORTC, 5
+#define     BreakBeam           PORTC, 2
 
 #define     Photo3              PORTC, 2
 #define     Photo2              PORTC, 1
@@ -48,12 +48,14 @@
 ; Stepper Controls
 #define     StepDelayVal        0x1F
 ; Operation Controls
-#define		OpDelay				d'8'
+#define		OpDelay				d'14'
 #define     TrayStep            d'8'            ; 26.6 degrees = 8 * 0.83077 * 4
 #define     MaxTrayStep         d'15'           ; 49.8 degrees
 #define		GripMotorDelay		d'100'          ; GripMotorDelay X 2ms
 #define     GripMotorOn         d'5'
-#define     GripMotorOff        d'15'
+#define     GripMotorOff        d'5'
+#define     ArmSolDelay         d'30'
+#define     GripSolDelay        d'120'
 
 key1				equ		d'0'
 key2				equ		d'1'
@@ -437,14 +439,16 @@ Init
 		; Setup I/O
         movlw       b'00000000'
         movwf       TRISA
-        movlw       b'00000111'
-        movwf       TRISE
         movlw		b'11111111'		; Set required keypad inputs (RB1 is interrupt)
         movwf		TRISB
-		movlw		b'10011111'		; RC7: USART RC, RC6: USART TX
+		movlw		b'10111111'		; RC7: USART RC, RC6: USART TX
 		movwf		TRISC			; RC3, RC4: for RTC
 		movlw		b'00000000'
 		movwf		TRISD
+        movlw       b'00000111'
+        movwf       TRISE
+        movlw       b'00001111'     ; Set all AN pins to Digital
+        movwf       ADCON1
 		; Clear Ports
         clrf		LATA
         clrf		LATB
@@ -551,7 +555,7 @@ FOUND_FL
         bsf			ArmSol						; Pull arm down
 		Delay50xNms	delayReg, OpDelay			; Delay
         bsf         GripSol                     ; Pull grip in
-		Delay50xNms	delayReg, OpDelay			; Delay
+		Delay50xNms	delayReg, OpDelay + 20			; Delay
         call        TurnGripCW                  ; Turn grip CW
 		Delay50xNms	delayReg, OpDelay			; Delay
         ; TAKE DATA FROM PHOTO SENSORS
@@ -578,9 +582,11 @@ FOUND_FL
 ;TURN_OFF_FL
         call        TurnGripCCW                 ; Turn grip CCW
 		Delay50xNms	delayReg, OpDelay			; Delay
-        bcf         GripSol                     ; Release grip
-		Delay50xNms	delayReg, OpDelay			; Delay
-        bcf         ArmSol                      ; Release arm
+        ;bcf         GripSol                     ; Release grip
+        call        ReleaseGripSol
+		Delay50xNms	delayReg, OpDelay + 20			; Delay
+        ;bcf         ArmSol                      ; Release arm
+        call        ReleaseArmSol
 		Delay50xNms	delayReg, OpDelay
 ;        clrf        Counter
 ;OFF_AGAIN
@@ -1083,19 +1089,6 @@ OneDegreeStepLoop
 		goto	OneDegreeStepLoop
 		return
 
-; Turn Gripper Subroutines
-;TurnGripCW
-;		bsf			GripMotorCW
-;		Delay50xNms	delayReg, GripMotorDelay
-;		bcf			GripMotorCW
-;        return
-;
-;TurnGripCCW
-;		bsf			GripMotorCCW
-;		Delay50xNms	delayReg, GripMotorDelay
-;		bcf			GripMotorCCW
-;        return
-
 TurnGripCW
         movlf       GripMotorDelay, delayReg
 TurnGripCW_START
@@ -1136,6 +1129,78 @@ TurnGripCCW_OFF
         goto        TurnGripCCW_OFF
         goto        TurnGripCCW_START
 END_TurnGripCCW
+        return
+
+ReleaseArmSol
+        ; Use gradual PWM to release ArmSol slowly
+        movlf       ArmSolDelay, delayReg           ; Say 10 ^ 2 ms to turn it off
+        clrf        Counter2
+ReleaseArmSol_START
+        incf        Counter2
+        dcfsnz      delayReg
+        goto        END_ReleaseArmSol
+        movlf       ArmSolDelay, Counter            ; Start with 90% on
+        movf        Counter2, W
+        subwf       Counter                         ; Subtract to 80, 70, so on every time
+ReleaseArmSol_ON
+		bsf			ArmSol
+		call        Delay100us
+		call        Delay100us
+		call        Delay100us
+		;call        Delay100us
+		;call        Delay100us
+        decfsz      Counter
+        goto        ReleaseArmSol_ON
+        movlf       0, Counter                      ; Start with 10% off
+        movf        Counter2, W
+        addwf       Counter                         ; Add to 20, 30 and so on
+ReleaseArmSol_OFF
+        bcf         ArmSol
+        call        Delay100us
+		call        Delay100us
+		call        Delay100us
+		;call        Delay100us
+		;call        Delay100us
+        decfsz      Counter
+        goto        ReleaseArmSol_OFF
+        goto        ReleaseArmSol_START
+END_ReleaseArmSol
+        return
+
+ReleaseGripSol
+        ; Use gradual PWM to release GripSol slowly
+        movlf       GripSolDelay, delayReg           ; Say 10 ^ 2 ms to turn it off
+        clrf        Counter2
+ReleaseGripSol_START
+        incf        Counter2
+        dcfsnz      delayReg
+        goto        END_ReleaseGripSol
+        movlf       GripSolDelay, Counter            ; Start with 90% on
+        movf        Counter2, W
+        subwf       Counter                         ; Subtract to 80, 70, so on every time
+ReleaseGripSol_ON
+		bsf			GripSol
+		call        Delay100us
+		call        ;Delay100us
+		call        ;Delay100us
+		call        ;Delay100us
+		call        ;Delay100us
+        decfsz      Counter
+        goto        ReleaseGripSol_ON
+        movlf       0, Counter                      ; Start with 10% off
+        movf        Counter2, W
+        addwf       Counter                         ; Add to 20, 30 and so on
+ReleaseGripSol_OFF
+        bcf         GripSol
+        call        Delay100us
+		call        ;Delay100us
+		call        ;Delay100us
+		call        ;Delay100us
+		call        ;Delay100us
+        decfsz      Counter
+        goto        ReleaseGripSol_OFF
+        goto        ReleaseGripSol_START
+END_ReleaseGripSol
         return
 
 
