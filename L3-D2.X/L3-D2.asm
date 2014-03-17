@@ -226,7 +226,7 @@ SendTable  macro   TableVar
 		movwf	TBLPTRU
 		movlw	high TableVar           ; Move Table<15:8> into TBLPTRH
 		movwf	TBLPTRH
-		movlw	low Tablevar            ; Move Table<7:0> into TBLPTRL
+		movlw	low TableVar            ; Move Table<7:0> into TBLPTRL
 		movwf	TBLPTRL
 		tblrd*                              ; Read byte at TBLPTR and copy to TABLAT
 		movf	TABLAT, W                   ; Move byte into W
@@ -308,6 +308,83 @@ Skip
 		goto		WriteSkip
 WriteSkip
 		call		WR_DATA
+		clrf		SkipCount
+		goto		Again
+Finish
+		nop
+		endm
+
+
+SendOpLog	macro	addrH, addrL
+		local		Again, P, OneF, TwoF, ThreeF, N, Write, Skip, WriteSkip, Finish
+		clrf		SkipCount
+		clrf		OpLogFinishCount
+		; Check if there is No Data first
+		ReadEEPROM	EEPROM_REG, addrH, addrL
+		movlw		0xFF
+		cpfseq		EEPROM_REG
+		goto		Again
+		SendTable	NoData
+		goto		Finish
+Again
+		; Put a space every 3 Writes
+		movlw		d'3'
+		cpfslt		SkipCount
+		goto		Skip
+		cpfslt		OpLogFinishCount
+		goto		Finish
+		; Read EEPROM data
+		ReadEEPROM	EEPROM_REG, addrH, addrL
+		btfsc		EEPROM_REG, 7	; If bit 7 is (1) Finish
+		goto		Finish
+		; Check if FL was present
+		btfss		EEPROM_REG, 3	; If bit 3 is (1), there was a FL
+		goto		N				; If bit 3 is (0), there was no FL, so print N
+		; Count how many LED was on
+		btfsc		EEPROM_REG, 2
+		incf		LED_Count
+		btfsc		EEPROM_REG, 1
+		incf		LED_Count
+		btfsc		EEPROM_REG, 0
+		incf		LED_Count
+		; Branch to appropriate #
+		movlw		d'3'
+		cpfslt		LED_Count
+		goto		P
+		movlw		d'2'
+		cpfslt		LED_Count
+		goto		OneF
+		movlw		d'1'
+		cpfslt		LED_Count
+		goto		TwoF
+		goto		ThreeF
+P
+		movlw		0x50
+		goto		Write
+OneF
+		movlw		0x31
+		goto		Write
+TwoF
+		movlw		0x32
+		goto		Write
+ThreeF
+		movlw		0x33
+		goto		Write
+N
+		movlw		0x4E			; ASCII 'N'
+		goto		Write
+Write
+		call		TransmitWaitUSART			; Write Char to LCD
+		incf		addrL			; Next byte in EEPROM
+		incf		SkipCount
+		clrf		LED_Count
+		goto		Again
+Skip
+		movlw		0x20			; ASCII ' '
+		incf		OpLogFinishCount
+		goto		WriteSkip
+WriteSkip
+		call		TransmitWaitUSART
 		clrf		SkipCount
 		goto		Again
 Finish
@@ -447,7 +524,9 @@ PermLog_L1		db	"P. Log ", 0
 PCInter_L1		db	"PC Interface", 0
 PCInter_L2		db	"0: Start", 0
 PCTransfer_L1	db	"Transfering...", 0
-PCLog_Intro     db  "Log Time and Date: "
+PCLog_Intro     db  "Log Time and Date: ", 0
+PCInter_OpTime  db  "Operation Speed and Date: ", 0
+PCInter_OpLog   db  "#: 123 456 789", 0
 NoData			db	"N/A", 0
 
 ; ****************************************************************************
@@ -831,7 +910,7 @@ Stay_PermLog
 PermLogDetails
 		call		ClrLCD
 		DispTable	OpLogDetails_L1
-		call LCD_L2
+		call        LCD_L2
 		DispTable	OpLogDetails_L2
 		movff		PRODL, EEPROM_L						; Reset EEPROM to beginning of run
 		DispOpLog	EEPROM_H, EEPROM_L
@@ -1342,13 +1421,45 @@ SendDataUSART
         ; Newline
         movlw       0x0A
         call        TransmitWaitUSART
+        call        TransmitWaitUSART
+        ; Initialize N = 1
+        clrf        Counter
+        incf        Counter
 SendUSARTLoop
-		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		; Send Op Time
+        SendTable   PCInter_OpTime
+        movlw       0x0A
+        call        TransmitWaitUSART
+        movlw       d'21'
+        mulwf       Counter
+		movff		PRODL, EEPROM_L                     ; EEPROM points to N x 21
+		movlw		d'9'
+        addwf       EEPROM_L
+		ReadEEPROM	Op_Seconds, EEPROM_H, EEPROM_L
 		incf		EEPROM_L
-		movf		EEPROM_REG, W	;Load EEPROM_REG into W
-		call        TransmitWaitUSART
-
-
+		ReadEEPROM	Op_Interrupts, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		call		SendOpTime
+		; Send Op RTC
+        movlw       0x09                                ; TAB
+        call        TransmitWaitUSART
+		movff       PRODL, EEPROM_L                     ; Reset EEPROM_L
+		call		SendOpRTC
+        movlw       0x0A
+        call        TransmitWaitUSART
+        ; Send Op Log
+        SendTable   PCInter_OpLog
+        movlw       0x0A
+        call        TransmitWaitUSART
+        clrf        EEPROM_H
+        movff       PRODL, EEPROM_L
+		SendOpLog	EEPROM_H, EEPROM_L
+        movlw       0x0A
+        call        TransmitWaitUSART
+        call        TransmitWaitUSART
+        ; Increment counters
+        incf        Counter
+        ; Check ending conditions
 		movlw		d'21' * 10
 		cpfseq		EEPROM_L
 		goto		SendUSARTLoop
@@ -1425,7 +1536,7 @@ SendOpRTC
 		SendTable	NoData
 		movlw		0xFF
 		cpfslt		EEPROM_REG
-		goto		SkipDSendOpRTC
+		goto		SkipSendOpRTC
 NoSkipSendOpRTC
 		; Hour
 		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
