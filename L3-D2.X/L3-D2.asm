@@ -52,10 +52,10 @@
 #define     TrayStep            d'8'            ; 26.6 degrees = 8 * 0.83077 * 4
 #define     MaxTrayStep         d'15'           ; 49.8 degrees
 #define		GripMotorDelay		d'100'          ; GripMotorDelay X 2ms
-#define     GripMotorOn         d'5'
-#define     GripMotorOff        d'5'
-#define     ArmSolDelay         d'30'
-#define     GripSolDelay        d'120'
+#define     GripMotorOn         d'4'
+#define     GripMotorOff        d'6'
+#define     ArmSolDelay         d'60'
+#define     GripSolDelay        d'30'
 
 key1				equ		d'0'
 key2				equ		d'1'
@@ -218,6 +218,24 @@ Again
 		movf	TABLAT, W		; Move new byte into W
 		bnz		Again			; Keep going until the end (0 byte)
 				endm
+
+SendTable  macro   TableVar
+		local	Again
+    ; Write Transfer Time/Date
+		movlw	upper TableVar          ; Move Table<20:16> into TBLPTRU
+		movwf	TBLPTRU
+		movlw	high TableVar           ; Move Table<15:8> into TBLPTRH
+		movwf	TBLPTRH
+		movlw	low Tablevar            ; Move Table<7:0> into TBLPTRL
+		movwf	TBLPTRL
+		tblrd*                              ; Read byte at TBLPTR and copy to TABLAT
+		movf	TABLAT, W                   ; Move byte into W
+Again
+		call	TransmitWaitUSART			; Write byte to LCD
+		tblrd+*                             ; Increment pointer
+		movf	TABLAT, W                   ; Move new byte into W
+		bnz		Again                       ; Keep going until the end (0 byte)
+            endm
 
 ; Display Operation Log on LCD
 DispOpLog	macro	addrH, addrL
@@ -429,6 +447,7 @@ PermLog_L1		db	"P. Log ", 0
 PCInter_L1		db	"PC Interface", 0
 PCInter_L2		db	"0: Start", 0
 PCTransfer_L1	db	"Transfering...", 0
+PCLog_Intro     db  "Log Time and Date: "
 NoData			db	"N/A", 0
 
 ; ****************************************************************************
@@ -494,10 +513,10 @@ Init
 		; SET UP RTC            11:30PM, 02/19/2014
 ;		rtc_resetAll
 ;		rtc_set 0x00, b'00000000'		; Set seconds to 0
-;		rtc_set 0x01, b'00110000'		; Set minutes (30)
-;		rtc_set	0x02, b'01110001'		; Set hours (11PM) (0, 12hour/24hour, PM/AM, 10hour)
-;		rtc_set 0x04, b'00011001'		; Set day (19)
-;		rtc_set	0x05, b'00000010'		; Set month (2)
+;		rtc_set 0x01, b'00001000'		; Set minutes (30)
+;		rtc_set	0x02, b'01100011'		; Set hours (11PM) (0, 12hour/24hour, PM/AM, 10hour)
+;		rtc_set 0x04, b'00010110'		; Set day (19)
+;		rtc_set	0x05, b'00000011'		; Set month (2)
 ;		rtc_set 0x06, b'00010100'		; Set year (14)
 
 
@@ -1033,7 +1052,7 @@ ClearNext
 		clrf		EEPROM_L
 		return
 
-; STEPPER MOTOR SUBROUTINES
+; ACTUATOR SUBROUTINES
 Step1
         bsf         Step1a
         bcf         Step1b
@@ -1181,10 +1200,10 @@ ReleaseGripSol_START
 ReleaseGripSol_ON
 		bsf			GripSol
 		call        Delay100us
-		call        ;Delay100us
-		call        ;Delay100us
-		call        ;Delay100us
-		call        ;Delay100us
+;		call        ;Delay100us
+;		call        ;Delay100us
+;		call        ;Delay100us
+;		call        ;Delay100us
         decfsz      Counter
         goto        ReleaseGripSol_ON
         movlf       0, Counter                      ; Start with 10% off
@@ -1193,10 +1212,10 @@ ReleaseGripSol_ON
 ReleaseGripSol_OFF
         bcf         GripSol
         call        Delay100us
-		call        ;Delay100us
-		call        ;Delay100us
-		call        ;Delay100us
-		call        ;Delay100us
+;		call        ;Delay100us
+;		call        ;Delay100us
+;		call        ;Delay100us
+;		call        ;Delay100us
         decfsz      Counter
         goto        ReleaseGripSol_OFF
         goto        ReleaseGripSol_START
@@ -1243,8 +1262,6 @@ WaitKeyRTC
         call        WR_DATA
 		movlw		" "
         call        WR_DATA
-
-
 		; Display month
 		rtc_read	0x05
 		WriteRTC
@@ -1282,32 +1299,186 @@ InitUSART
 		return
 
 SendDataUSART
-		local	Again
-		movlf		d'21', EEPROM_L	; Set EEPROM_L to beginning of Permanent Log
-		; Write Transfer Time/Date
-;		movlw	upper TableVar	; Move Table<20:16> into TBLPTRU
-;		movwf	TBLPTRU
-;		movlw	high TableVar	; Move Table<15:8> into TBLPTRH
-;		movwf	TBLPTRH
-;		movlw	low TableVar	; Move Table<7:0> into TBLPTRL
-;		movwf	TBLPTRL
-;		tblrd*					; Read byte at TBLPTR and copy to TABLAT
-;		movf	TABLAT, W		; Move byte into W
-;Again
-;		call	WR_DATA			; Write byte to LCD
-;		tblrd+*					; Increment pointer
-;		movf	TABLAT, W		; Move new byte into W
-;		bnz		Again			; Keep going until the end (0 byte)
+		movlf		d'21', EEPROM_L         ; Set EEPROM_L to beginning of Permanent Log
+    ; Write Transfer Time/Date
+		SendTable   PCLog_Intro
+    ; RTC display
+		; Display hours
+		rtc_read	0x02
+		movf        tens_digit, W
+        andlw       b'00000001'
+        addlw       0x30
+        call        TransmitWaitUSART
+        movf        ones_digit, W
+        call        TransmitWaitUSART
+		movlw		":"
+		call		TransmitWaitUSART
+		; Dispay minutes
+		rtc_read	0x01
+		call        SendRTC_USART
+		; Dispay AM/PM
+		rtc_read	0x02
+        movlw       "P"
+        btfss       tens_digit, 1
+        movlw       "A"
+        call        TransmitWaitUSART
+        movlw       "M"
+        call        TransmitWaitUSART
+		movlw		" "
+        call        TransmitWaitUSART
+		; Display month
+		rtc_read	0x05
+		call        SendRTC_USART
+		movlw		0x2F		; ASCII '/'
+		call		TransmitWaitUSART
+		; Display day
+		rtc_read	0x04
+		call        SendRTC_USART
+		movlw		0x2F		; ASCII '/'
+		call		TransmitWaitUSART
+		; Display year
+		rtc_read	0x06
+		call        SendRTC_USART
+        ; Newline
+        movlw       0x0A
+        call        TransmitWaitUSART
 SendUSARTLoop
 		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
 		incf		EEPROM_L
 		movf		EEPROM_REG, W	;Load EEPROM_REG into W
-		movwf		TXREG			;Send it over RS232
-        btfss		TXSTA,1        ; check TRMT bit in TXSTA (FSR) until TRMT=1
-        goto		$-2
+		call        TransmitWaitUSART
+
+
 		movlw		d'21' * 10
 		cpfseq		EEPROM_L
 		goto		SendUSARTLoop
+		return
+
+TransmitWaitUSART
+        movwf		TXREG			;Send it over RS232
+        btfss		TXSTA,1        ; check TRMT bit in TXSTA (FSR) until TRMT=1
+        goto		$-2
+        return
+
+
+SendRTC_USART
+		movff		tens_digit, WREG
+		call		TransmitWaitUSART
+		movff		ones_digit, WREG
+		call		TransmitWaitUSART
+        return
+
+; Subroutines to Send Run Data to USART
+SendOpTime
+		; Send 'No Data' if there was no stored time
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movlw		0xFF
+		cpfseq		EEPROM_REG
+		goto		NoSkipSendOpTime
+		SendTable	NoData
+		movlw		0xFF
+		cpfslt		EEPROM_REG
+		goto		SkipSendOpTime
+NoSkipSendOpTime
+		; 10's seconds
+		swapf		Op_Seconds, W				; Swap and mask upper nibble of Op_Seconds
+		movwf		Temp
+		movlw		0x0F
+		andwf		Temp						; Temp = upper nibble of Op_Seconds
+		movff		Temp, WREG					; W = Temp
+		addlw		0x30						; Convert to ASCII
+		call		TransmitWaitUSART
+		; 1's seconds
+		movff		Op_Seconds, Temp			; Mask lower nibble of Op_Seconds
+		movlw		0x0F
+		andwf		Temp						; Temp = lower nibble of Op_Seconds
+		movff		Temp, WREG					; W = Temp
+		addlw		0x30						; Convert to ASCII
+		call		TransmitWaitUSART
+		; Write '.'
+		movlw		0x2E
+		call		TransmitWaitUSART
+		; .1's seconds
+		swapf		Op_Interrupts, W			; Swap and mask upper nibble of Op_Interrupts
+		movwf		Temp
+		movlw		0x0F
+		andwf		Temp						; Temp = upper nibble of Op_Interrupts
+		movff		Temp, WREG					; W = Temp
+		addlw		0x30						; Convert to ASCII
+		call		TransmitWaitUSART
+		; Write 's'
+		movlw		0x73
+		call		TransmitWaitUSART
+		call		LCD_L2
+SkipSendOpTime
+		return
+
+SendOpRTC
+		; Initiate EEPROM_L
+		movlw		d'11'
+		addwf		EEPROM_L
+		; Send 'No Data' if there was no stored time
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movlw		0xFF
+		cpfseq		EEPROM_REG
+		goto		NoSkipSendOpRTC
+		SendTable	NoData
+		movlw		0xFF
+		cpfslt		EEPROM_REG
+		goto		SkipDSendOpRTC
+NoSkipSendOpRTC
+		; Hour
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movff		EEPROM_REG, WREG
+        andlw       b'11110001'
+		call		TransmitWaitUSART
+		incf		EEPROM_L
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movff		EEPROM_REG, WREG
+		call		TransmitWaitUSART
+		incf		EEPROM_L
+		; Print ':'
+		movlw		":"
+		call		TransmitWaitUSART
+		; Minute
+		call SendOpRTC_Helper
+        ; AM/PM
+        movlw       d'4'
+        subwf       EEPROM_L
+        ReadEEPROM  EEPROM_REG, EEPROM_H, EEPROM_L
+        movlw       "P"
+        btfss       EEPROM_REG, 1
+        movlw       "A"
+        call        TransmitWaitUSART
+        movlw       "M"
+        call        TransmitWaitUSART
+        movlw       d'4'
+        addwf       EEPROM_L
+		; Print ' '
+		movlw		" "
+		call		TransmitWaitUSART
+		; Month
+		call SendOpRTC_Helper
+		; Print '/'
+		movlw		"/"
+		call		TransmitWaitUSART
+		; Day
+		call SendOpRTC_Helper
+		; Print '/'
+		movlw		"/"
+		call		TransmitWaitUSART
+		call SendOpRTC_Helper
+SkipSendOpRTC
+		return
+SendOpRTC_Helper
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movff		EEPROM_REG, WREG
+		call		TransmitWaitUSART
+		incf		EEPROM_L
+		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
+		movff		EEPROM_REG, WREG
+		call		TransmitWaitUSART
+		incf		EEPROM_L
 		return
 
 	END
