@@ -10,7 +10,7 @@
 		CONFIG OSC=HS, FCMEN=OFF, IESO=OFF
 		CONFIG PWRT = OFF, BOREN = SBORDIS, BORV = 3
 		CONFIG WDT = OFF, WDTPS = 32768
-		CONFIG MCLRE = ON, LPT1OSC = OFF, PBADEN = OFF, CCP2MX = PORTC
+		CONFIG MCLRE = ON, LPT1OSC = OFF, PBADEN = OFF
 		CONFIG STVREN = ON, LVP = OFF, XINST = OFF
 		CONFIG DEBUG = OFF
 		CONFIG CP0 = OFF, CP1 = OFF, CP2 = OFF, CP3 = OFF
@@ -24,10 +24,10 @@
 ; CONSTANT DEFINES
 ; ****************************************************************************
 
-#define		ArmSol              LATD, 0
-#define     GripSol             LATD, 1
+#define		ArmSol              LATD, 1
+#define     GripSol             LATD, 0
 
-#define     BreakBeam           PORTC, 2
+#define     BreakBeam           PORTC, 5
 
 #define     Photo3              PORTC, 2
 #define     Photo2              PORTC, 1
@@ -46,15 +46,15 @@
 #define		TempEEPROM_L_Const	d'220'
 #define		LastPermLog			d'168'
 ; Stepper Controls
-#define     StepDelayVal        0x1F
+#define     StepDelayVal        0x3F
 ; Operation Controls
 #define		OpDelay				d'14'
-#define     TrayStep            d'8'            ; 26.6 degrees = 8 * 0.83077 * 4
-#define     MaxTrayStep         d'15'           ; 49.8 degrees
+#define     TrayStep            d'24'            ; 26.6 degrees = 8 * 0.83077 * 4
+#define     MaxTrayStep         d'60'           ; 49.8 degrees
 #define		GripMotorDelay		d'100'          ; GripMotorDelay X 2ms
 #define     GripMotorOn         d'4'
 #define     GripMotorOff        d'6'
-#define     ArmSolDelay         d'60'
+#define     ArmSolDelay         d'30'
 #define     GripSolDelay        d'30'
 
 key1				equ		d'0'
@@ -92,6 +92,7 @@ KEY_ISR				equ     0x52
 
 InOperation			equ     0x60
 TrayEncoder			equ     0x61
+StepCounter         equ     0x66
 stepDelay1			equ     0x62
 stepDelay2			equ     0x63
 FL_count			equ     0x64
@@ -195,7 +196,7 @@ XDegreeStep	macro	X
 		movlw	X
 		movwf	Counter
 Again
-		call	OneDegreeStep
+		call	StepMotor
 		incf	TrayEncoder
 		decfsz	Counter
 		goto	Again
@@ -526,7 +527,6 @@ PCInter_L2		db	"0: Start", 0
 PCTransfer_L1	db	"Transfering...", 0
 PCLog_Intro     db  "Log Time and Date: ", 0
 PCInter_OpTime  db  "Operation Speed and Date: ", 0
-PCInter_OpLog   db  "#: 123 456 789", 0
 NoData			db	"N/A", 0
 
 ; ****************************************************************************
@@ -631,6 +631,8 @@ Operation
 		clrf		Op_Seconds
 		clrf		Op_Interrupts
 		clrf		TrayEncoder
+        clrf        StepCounter
+        incf        StepCounter
 ;FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
 ;        btfss       BreakBeam
 ;        goto        FIND_FL
@@ -653,7 +655,7 @@ FOUND_FL
         bsf			ArmSol						; Pull arm down
 		Delay50xNms	delayReg, OpDelay			; Delay
         bsf         GripSol                     ; Pull grip in
-		Delay50xNms	delayReg, OpDelay + 20			; Delay
+		Delay50xNms	delayReg, OpDelay + 10			; Delay
         call        TurnGripCW                  ; Turn grip CW
 		Delay50xNms	delayReg, OpDelay			; Delay
         ; TAKE DATA FROM PHOTO SENSORS
@@ -682,7 +684,7 @@ FOUND_FL
 		Delay50xNms	delayReg, OpDelay			; Delay
         ;bcf         GripSol                     ; Release grip
         call        ReleaseGripSol
-		Delay50xNms	delayReg, OpDelay + 20			; Delay
+		Delay50xNms	delayReg, OpDelay + 10			; Delay
         ;bcf         ArmSol                      ; Release arm
         call        ReleaseArmSol
 		Delay50xNms	delayReg, OpDelay
@@ -1085,7 +1087,7 @@ DispOpRTC_Helper
 ; DATA SUBROUTINES
 PhotoData                                           ; CALLED FROM FOUND_FL
         movff       PORTC, PhotoInput               ; Take input from photo sensors
-        bsf         PhotoInput, 3                   ; Set 1 for break beam since FL was found
+        bsf         PhotoInput, 3                   ; Set 1 for break beam since FL was found           ; FIX RC3 for this
         movlw       b'00001111'
         andwf       PhotoInput
         WriteEEPROM PhotoInput, EEPROM_H, EEPROM_L
@@ -1136,25 +1138,29 @@ Step1
         bsf         Step1a
         bcf         Step1b
         bcf         Step2a
-        bcf         Step2b
+        bsf         Step2b
+        call        StepDelay
         return
 Step2
-        bcf         Step1a
+        bsf         Step1a
         bcf         Step1b
         bsf         Step2a
         bcf         Step2b
+        call        StepDelay
         return
 Step3
         bcf         Step1a
         bsf         Step1b
-        bcf         Step2a
+        bsf         Step2a
         bcf         Step2b
+        call        StepDelay
         return
 Step4
         bcf         Step1a
-        bcf         Step1b
+        bsf         Step1b
         bcf         Step2a
         bsf         Step2b
+        call        StepDelay
         return
 StepDelay
 		movlw	StepDelayVal
@@ -1168,23 +1174,35 @@ StepDelayLoop
 d2		goto	StepDelayLoop
 		return
 StepMotor
+        movlw       1
+        cpfseq      StepCounter
+        goto        SkipStep1
         call        Step1
-        call        StepDelay
+        goto        IncStep
+SkipStep1
+        movlw       2
+        cpfseq      StepCounter
+        goto        SkipStep2
         call        Step2
-        call        StepDelay
+        goto        IncStep
+SkipStep2
+        movlw       3
+        cpfseq      StepCounter
+        goto        SkipStep3
         call        Step3
-        call        StepDelay
+        goto        IncStep
+SkipStep3
         call        Step4
-        call        StepDelay
-		return
-
-OneDegreeStep ; Actually 0.83 degrees
-		movlw	d'1'
-		movwf	Counter2
-OneDegreeStepLoop
-		call	StepMotor
-		decfsz	Counter2
-		goto	OneDegreeStepLoop
+IncStep
+        incf        StepCounter
+        movlw       5
+        cpfseq      StepCounter
+        goto        EndStep
+        goto        ResetStep
+ResetStep
+        clrf        StepCounter
+        incf        StepCounter
+EndStep
 		return
 
 TurnGripCW
@@ -1243,8 +1261,8 @@ ReleaseArmSol_START
 ReleaseArmSol_ON
 		bsf			ArmSol
 		call        Delay100us
-		call        Delay100us
-		call        Delay100us
+		;call        Delay100us
+		;call        Delay100us
 		;call        Delay100us
 		;call        Delay100us
         decfsz      Counter
@@ -1255,8 +1273,8 @@ ReleaseArmSol_ON
 ReleaseArmSol_OFF
         bcf         ArmSol
         call        Delay100us
-		call        Delay100us
-		call        Delay100us
+		;call        Delay100us
+		;call        Delay100us
 		;call        Delay100us
 		;call        Delay100us
         decfsz      Counter
@@ -1379,6 +1397,9 @@ InitUSART
 
 SendDataUSART
 		movlf		d'21', EEPROM_L         ; Set EEPROM_L to beginning of Permanent Log
+    ; Beginning of file
+        movlw       0x02
+        call        TransmitWaitUSART
     ; Write Transfer Time/Date
 		SendTable   PCLog_Intro
     ; RTC display
@@ -1419,17 +1440,15 @@ SendDataUSART
 		rtc_read	0x06
 		call        SendRTC_USART
         ; Newline
-        movlw       0x0A
-        call        TransmitWaitUSART
-        call        TransmitWaitUSART
+        call        NewLineUSART
+        call        NewLineUSART
         ; Initialize N = 1
         clrf        Counter
         incf        Counter
 SendUSARTLoop
 		; Send Op Time
         SendTable   PCInter_OpTime
-        movlw       0x0A
-        call        TransmitWaitUSART
+        call        NewLineUSART
         movlw       d'21'
         mulwf       Counter
 		movff		PRODL, EEPROM_L                     ; EEPROM points to N x 21
@@ -1445,22 +1464,21 @@ SendUSARTLoop
         call        TransmitWaitUSART
 		movff       PRODL, EEPROM_L                     ; Reset EEPROM_L
 		call		SendOpRTC
-        movlw       0x0A
-        call        TransmitWaitUSART
+        call        NewLineUSART
         ; Send Op Log
-        SendTable   PCInter_OpLog
-        movlw       0x0A
+        SendTable   OpLogDetails_L1
+        call        NewLineUSART
+        SendTable   OpLogDetails_L2
         call        TransmitWaitUSART
         clrf        EEPROM_H
         movff       PRODL, EEPROM_L
 		SendOpLog	EEPROM_H, EEPROM_L
-        movlw       0x0A
-        call        TransmitWaitUSART
-        call        TransmitWaitUSART
+        call        NewLineUSART
+        call        NewLineUSART
         ; Increment counters
         incf        Counter
         ; Check ending conditions
-		movlw		d'21' * 10
+		movlw		d'21' * 9
 		cpfseq		EEPROM_L
 		goto		SendUSARTLoop
 		return
@@ -1477,6 +1495,13 @@ SendRTC_USART
 		call		TransmitWaitUSART
 		movff		ones_digit, WREG
 		call		TransmitWaitUSART
+        return
+
+NewLineUSART
+        movlw       0x0A
+        call        TransmitWaitUSART
+        movlw       0x0D
+        call        TransmitWaitUSART
         return
 
 ; Subroutines to Send Run Data to USART
