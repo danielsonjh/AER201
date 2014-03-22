@@ -48,12 +48,12 @@
 ; Stepper Controls
 #define     StepDelayVal        0x1F
 ; Operation Controls
-#define		OpDelay				d'10'
-#define     TrayStep            d'24'           ; 19.9 degrees = 24 * 0.83077
+#define		OpDelay				d'14'
+#define     TrayStep            d'24 '           ; 19.9 degrees = 24 * 0.83077
 #define     MaxTrayStep         d'60'           ; 49.8 degrees
-#define		GripMotorDelay		d'100'          ; GripMotorDelay X (ON + OFF)/5 ms
-#define     GripMotorOn         d'4'
-#define     GripMotorOff        d'6'
+#define		GripMotorDelay		d'170'          ; GripMotorDelay X (ON + OFF)/5 ms
+#define     GripMotorOn         d'7'
+#define     GripMotorOff        d'3'
 #define     ArmSolDelay         d'250'          ; Max Duty Cycle = (N - 1) / N
 #define     GripSolDelay        d'250'          ; Min Duty Cycle = 1 / N
 
@@ -693,11 +693,11 @@ Operation
 		clrf		TrayEncoder
         clrf        StepCounter
         incf        StepCounter
-;FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
-;        btfss       BreakBeam
-;        goto        FIND_FL
-;		XDegreeStep 1
-;        goto        FIND_FIRST_FL
+FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
+        btfss       BreakBeam
+        goto        FIND_FL                     
+		XDegreeStep 1
+        goto        FIND_FIRST_FL
 
 FIND_FL
         btfss       BreakBeam                   ; Skip if beam is not broken (1)
@@ -716,6 +716,10 @@ FOUND_FL
         PullSol     ArmSol, ArmSolDelay
 		Delay50xNms	delayReg, OpDelay			; Delay
         PullSol     GripSol, GripSolDelay
+
+;forever
+;        goto        forever
+
 		Delay50xNms	delayReg, OpDelay + 5			; Delay
         call        TurnGripCW                  ; Turn grip CW
 		Delay50xNms	delayReg, OpDelay			; Delay
@@ -741,6 +745,12 @@ FOUND_FL
 ;		Delay50xNms	delayReg, OpDelay			; Delay
 ;        call        RePhotoData                ; Retake PhotoData once before turning off
 ;TURN_OFF_FL
+
+;        ReleaseSol  GripSol, GripSolDelay
+;        Delay50xNms delayReg, OpDelay
+;        PullSol     GripSol, GripSolDelay
+;        Delay50xNms delayReg, OpDelay
+
         call        TurnGripCCW                  ; Turn grip CCW
 		Delay50xNms	delayReg, OpDelay			 ; Delay
         ReleaseSol  GripSol, GripSolDelay
@@ -760,13 +770,13 @@ FOUND_FL
 ;        btfsc       Photo1
 ;        goto        FL_IS_OFF
 ;        ; IF NOT TRY TURNING OFF AGAIN
-;        call        TurnGripCCW
+;        call        TurnGripCW
 ;        Delay50xNms delayReg, OpDelay
 ;        PullSol     ArmSol, ArmSolDelay
 ;        Delay50xNms delayReg, OpDelay
 ;        PullSol     GripSol, GripSolDelay
 ;        Delay50xNms delayReg, OpDelay
-;        call        TurnGripCW
+;        call        TurnGripCCW
 ;        Delay50xNms delayReg, OpDelay
 ;        ReleaseSol  GripSol, GripSolDelay
 ;        Delay50xNms delayReg, OpDelay
