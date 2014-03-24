@@ -48,14 +48,15 @@
 ; Stepper Controls
 #define     StepDelayVal        0x1F
 ; Operation Controls
-#define		OpDelay				d'14'
-#define     TrayStep            d'24 '           ; 19.9 degrees = 24 * 0.83077
-#define     MaxTrayStep         d'60'           ; 49.8 degrees
-#define		GripMotorDelay		d'170'          ; GripMotorDelay X (ON + OFF)/5 ms
+#define		OpDelay				d'10'
+#define     TrayStep            d'42'           ; 19.9 degrees = 24 * 0.83077
+#define     MaxTrayStep         d'70'           ; 49.8 degrees
+#define		GripMotorDelay		d'220'          ; GripMotorDelay X (ON + OFF)/5 ms
 #define     GripMotorOn         d'7'
 #define     GripMotorOff        d'3'
-#define     ArmSolDelay         d'250'          ; Max Duty Cycle = (N - 1) / N
-#define     GripSolDelay        d'250'          ; Min Duty Cycle = 1 / N
+#define     SolDelay            d'120'
+#define     ArmSolDelay         d'30'          ; Max Duty Cycle = (N - 1) / N
+#define     GripSolDelay        d'50'          ; Min Duty Cycle = 1 / N
 
 key1				equ		d'0'
 key2				equ		d'1'
@@ -437,10 +438,10 @@ ChangeState	macro	KeyCode, NextState
 		cpfseq		KEY
 		goto		NotNext
 Next								; Before going to the next state,
-		clrf		PORTA			; Clear all Pins
-        clrf		PORTB
-        clrf		PORTC
-        clrf		PORTD
+		clrf		LATA			; Clear all Pins
+        clrf		LATB
+        clrf		LATC
+        clrf		LATD
 		goto		NextState
 NotNext
 		nop
@@ -475,6 +476,7 @@ ReleaseSol_OFF
         goto        ReleaseSol_START
 END_ReleaseSol
             endm
+
 
 PullSol  macro      Sol, Delay
         local       PullSol_START, PullSol_ON, PullSol_OFF, END_PullSol
@@ -589,6 +591,7 @@ PCInter_L2		db	"0: Start", 0
 PCTransfer_L1	db	"Transfering...", 0
 PCLog_Intro     db  "Log Time and Date: ", 0
 PCInter_OpTime  db  "Operation Speed and Date: ", 0
+JAMMED_L1       db  "MACHINE IS JAMMED", 0
 NoData			db	"N/A", 0
 
 ; ****************************************************************************
@@ -693,13 +696,14 @@ Operation
 		clrf		TrayEncoder
         clrf        StepCounter
         incf        StepCounter
-FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
-        btfss       BreakBeam
-        goto        FIND_FL                     
-		XDegreeStep 1
-        goto        FIND_FIRST_FL
+;FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
+;        btfss       BreakBeam
+;        goto        FIND_FL
+;		XDegreeStep 1
+;        goto        FIND_FIRST_FL
 
 FIND_FL
+        clrf        LATC
         btfss       BreakBeam                   ; Skip if beam is not broken (1)
         goto        FOUND_FL                    ; If beam is broken (0) go to FOUND_FL
 		movlw		MaxTrayStep
@@ -713,18 +717,15 @@ FOUND_FL
         incf		FL_count
         ; TURN ON LED
         Delay50xNms delayReg, OpDelay
-        PullSol     ArmSol, ArmSolDelay
+        bsf         LATD, ArmSol
 		Delay50xNms	delayReg, OpDelay			; Delay
-        PullSol     GripSol, GripSolDelay
-
-;forever
-;        goto        forever
-
-		Delay50xNms	delayReg, OpDelay + 5			; Delay
+        bsf         LATD, GripSol
+		Delay50xNms	delayReg, OpDelay			; Delay
         call        TurnGripCW                  ; Turn grip CW
-		Delay50xNms	delayReg, OpDelay			; Delay
         ; TAKE DATA FROM PHOTO SENSORS
         call        PhotoData
+		Delay50xNms	delayReg, OpDelay			; Delay
+
 ;        ; Check if FL was '3 FAIL' and try to turn FL on again if that was the case
 ;        movlw       b'00001000'
 ;        cpfsgt      PhotoInput
@@ -754,7 +755,7 @@ FOUND_FL
         call        TurnGripCCW                  ; Turn grip CCW
 		Delay50xNms	delayReg, OpDelay			 ; Delay
         ReleaseSol  GripSol, GripSolDelay
-		Delay50xNms	delayReg, OpDelay + 5		 ; Delay
+		Delay50xNms	delayReg, OpDelay   		 ; Delay
         ReleaseSol  ArmSol, ArmSolDelay
 		Delay50xNms	delayReg, OpDelay
 ;        clrf        Counter
@@ -791,7 +792,18 @@ FOUND_FL
         cpfslt      FL_count					; Skip if less than 9 FL counted
         goto        EXIT_OP                     ; Exit if FL_count is 9
 		XDegreeStep	TrayStep
+
+        btfss       BreakBeam                                                                           ; NEW CODE
+        goto        JAMMED
+
         goto        FIND_FL                     ; Keep looking for FL if under 9 count
+
+JAMMED
+        call        ClrLCD
+        DispTable   JAMMED
+        call        LCD_L2
+        DispTable   Operation_L2
+
 
 NO_MORE_FL
         incf		FL_count
@@ -821,6 +833,7 @@ EXIT_OP
 		call		WriteEEPROM_RTC
 		; Clear InOperation flag to stop '*' interrupts
 		clrf		InOperation
+        clrf        LATA                        ; Demagnetize stepper
         goto        SaveData
 
 ; SAVE DATA STATE
@@ -1021,7 +1034,7 @@ PCTransfer
 
 ; DELAYS
 Delay5us                            ; Delay 10 cycles
-        movlw       d'2'            ; 1
+        movlw       SolDelay        ; 1
         movwf       reg5us          ; 1
 loop5us
         decfsz      reg5us          ; (3 * 3) - 1 = 5 cycles
@@ -1324,62 +1337,62 @@ TurnGripCCW_OFF
         goto        TurnGripCCW_START
 END_TurnGripCCW
         return
-;
-;ReleaseArmSol
-;        ; Use gradual PWM to release ArmSol slowly
-;        movlf       ArmSolDelay, delayReg           ; Say 10 ^ 2 ms to turn it off
-;        clrf        Counter2
-;ReleaseArmSol_START
-;        incf        Counter2
-;        dcfsnz      delayReg
-;        goto        END_ReleaseArmSol
-;        movlf       ArmSolDelay, Counter            ; Start with 90% on
-;        movf        Counter2, W
-;        subwf       Counter                         ; Subtract to 80, 70, so on every time
-;ReleaseArmSol_ON
-;		bsf			ArmSol
-;		call        Delay200us
-;        decfsz      Counter
-;        goto        ReleaseArmSol_ON
-;        movlf       0, Counter                      ; Start with 10% off
-;        movf        Counter2, W
-;        addwf       Counter                         ; Add to 20, 30 and so on
-;ReleaseArmSol_OFF
-;        bcf         ArmSol
-;        call        Delay200us
-;        decfsz      Counter
-;        goto        ReleaseArmSol_OFF
-;        goto        ReleaseArmSol_START
-;END_ReleaseArmSol
-;        return
-;
-;ReleaseGripSol
-;        ; Use gradual PWM to release GripSol slowly
-;        movlf       GripSolDelay, delayReg           ; Say 10 ^ 2 ms to turn it off
-;        clrf        Counter2
-;ReleaseGripSol_START
-;        incf        Counter2
-;        dcfsnz      delayReg
-;        goto        END_ReleaseGripSol
-;        movlf       GripSolDelay, Counter            ; Start with 90% on
-;        movf        Counter2, W
-;        subwf       Counter                         ; Subtract to 80, 70, so on every time
-;ReleaseGripSol_ON
-;		bsf			GripSol
-;		call        Delay200us
-;        decfsz      Counter
-;        goto        ReleaseGripSol_ON
-;        movlf       0, Counter                      ; Start with 10% off
-;        movf        Counter2, W
-;        addwf       Counter                         ; Add to 20, 30 and so on
-;ReleaseGripSol_OFF
-;        bcf         GripSol
-;        call        Delay200us
-;        decfsz      Counter
-;        goto        ReleaseGripSol_OFF
-;        goto        ReleaseGripSol_START
-;END_ReleaseGripSol
-;        return
+
+ReleaseArmSol
+        ; Use gradual PWM to release ArmSol slowly
+        movlf       ArmSolDelay, delayReg           ; Say 10 ^ 2 ms to turn it off
+        clrf        Counter2
+ReleaseArmSol_START
+        incf        Counter2
+        dcfsnz      delayReg
+        goto        END_ReleaseArmSol
+        movlf       ArmSolDelay, Counter            ; Start with 90% on
+        movf        Counter2, W
+        subwf       Counter                         ; Subtract to 80, 70, so on every time
+ReleaseArmSol_ON
+		bsf			LATD, ArmSol
+		call        Delay200us
+        decfsz      Counter
+        goto        ReleaseArmSol_ON
+        movlf       0, Counter                      ; Start with 10% off
+        movf        Counter2, W
+        addwf       Counter                         ; Add to 20, 30 and so on
+ReleaseArmSol_OFF
+        bcf         LATD, ArmSol
+        call        Delay200us
+        decfsz      Counter
+        goto        ReleaseArmSol_OFF
+        goto        ReleaseArmSol_START
+END_ReleaseArmSol
+        return
+
+ReleaseGripSol
+        ; Use gradual PWM to release GripSol slowly
+        movlf       GripSolDelay, delayReg           ; Say 10 ^ 2 ms to turn it off
+        clrf        Counter2
+ReleaseGripSol_START
+        incf        Counter2
+        dcfsnz      delayReg
+        goto        END_ReleaseGripSol
+        movlf       GripSolDelay, Counter            ; Start with 90% on
+        movf        Counter2, W
+        subwf       Counter                         ; Subtract to 80, 70, so on every time
+ReleaseGripSol_ON
+		bsf			LATD, GripSol
+		call        Delay200us
+        decfsz      Counter
+        goto        ReleaseGripSol_ON
+        movlf       0, Counter                      ; Start with 10% off
+        movf        Counter2, W
+        addwf       Counter                         ; Add to 20, 30 and so on
+ReleaseGripSol_OFF
+        bcf         LATD, GripSol
+        call        Delay200us
+        decfsz      Counter
+        goto        ReleaseGripSol_OFF
+        goto        ReleaseGripSol_START
+END_ReleaseGripSol
+        return
 
 
 ; Read Keypad Input
