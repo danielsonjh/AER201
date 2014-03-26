@@ -1478,9 +1478,12 @@ SendDataUSART
 ;        call        TransmitWaitUSART
 ;        decfsz      Counter
 ;        goto        ERASE
-;        movlf       255, Counter2
-;        decfsz      Counter2
-;        goto        ERASE
+
+        ;START OF PROGRAM
+         movlw      0x02
+         call       TransmitWaitUSART
+         movlw      0x0D
+         call       TransmitWaitUSART
 
 		movlf		d'21', EEPROM_L         ; Set EEPROM_L to beginning of Permanent Log
     ; Clear console - ESC[2J (VT100 escape sequence)
@@ -1570,7 +1573,7 @@ SendUSARTLoop
         ; Increment counters
         incf        Counter
         ; Check ending conditions
-		movlw		6
+		movlw		10
 		cpfseq		Counter
 		goto		SendUSARTLoop
 		return
@@ -1580,7 +1583,6 @@ TransmitWaitUSART
         btfss		TXSTA,1        ; check TRMT bit in TXSTA (FSR) until TRMT=1
         goto		$-2
         return
-
 
 SendRTC_USART
 		movff		tens_digit, WREG
