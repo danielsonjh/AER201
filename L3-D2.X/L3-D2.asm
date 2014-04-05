@@ -24,8 +24,8 @@
 ; CONSTANT DEFINES
 ; ****************************************************************************
 
-#define		ArmSol              1
-#define     GripSol             0
+#define		ArmSol              0
+#define     GripSol             1
 
 #define     BreakBeam           PORTC, 5
 
@@ -55,8 +55,8 @@
 #define     GripMotorOn         d'7'
 #define     GripMotorOff        d'3'
 #define     SolDelay            d'120'
-#define     ArmSolDelay         d'30'          ; Max Duty Cycle = (N - 1) / N
-#define     GripSolDelay        d'50'          ; Min Duty Cycle = 1 / N
+#define     ArmSolDelay         d'50'          ; Max Duty Cycle = (N - 1) / N
+#define     GripSolDelay        d'30'          ; Min Duty Cycle = 1 / N
 
 key1				equ		d'0'
 key2				equ		d'1'
