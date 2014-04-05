@@ -46,9 +46,9 @@
 #define		TempEEPROM_L_Const	d'220'
 #define		LastPermLog			d'168'
 ; Stepper Controls
-#define     StepDelayVal        0x1F
+#define     StepDelayVal        0x1D
 ; Operation Controls
-#define		OpDelay				d'10'
+#define		OpDelay				d'7'
 #define     TrayStep            d'42'           ; 19.9 degrees = 24 * 0.83077
 #define     MaxTrayStep         d'70'           ; 49.8 degrees
 #define		GripMotorDelay		d'200'          ; GripMotorDelay X (ON + OFF)/5 ms
@@ -56,7 +56,7 @@
 #define     GripMotorOff        d'2'
 #define     SolDelay            d'120'
 #define     ArmSolDelay         d'50'          ; Max Duty Cycle = (N - 1) / N
-#define     GripSolDelay        d'30'          ; Min Duty Cycle = 1 / N
+#define     GripSolDelay        d'1'          ; Min Duty Cycle = 1 / N
 
 key1				equ		d'0'
 key2				equ		d'1'
@@ -99,6 +99,7 @@ stepDelay1			equ     0x62
 stepDelay2			equ     0x63
 FL_count			equ     0x64
 PhotoInput			equ     0x65
+RepeatCount         equ     0x66
 
 EEPROM_CLEAR		equ		0x79
 EEPROM_H			equ		0x80
@@ -696,6 +697,7 @@ Operation
 		clrf		TrayEncoder
         clrf        StepCounter
         incf        StepCounter
+
 ;FIND_FIRST_FL                                   ; Keep rotating until break beam is (1) not broken
 ;        btfss       BreakBeam
 ;        goto        FIND_FL
@@ -726,67 +728,67 @@ FOUND_FL
         call        PhotoData
 		Delay50xNms	delayReg, OpDelay			; Delay
 
-;        ; Check if FL was '3 FAIL' and try to turn FL on again if that was the case
-;        movlw       b'00001000'
-;        cpfsgt      PhotoInput
-;        goto        ON_AGAIN                    ; Skip if any LED was on
-;        goto        TURN_OFF_FL
-;ON_AGAIN
-;       ReleaseSol  GripSol, GripSolDelay
-;		Delay50xNms	delayReg, OpDelay			; Delay
-;       ReleaseSol  ArmSol, ArmSolDelay
-;		Delay50xNms	delayReg, OpDelay			; Delay
-;        call        TurnGripCCW
-;		Delay50xNms	delayReg, OpDelay			; Delay
-;       PullSol     ArmSol, ArmSolDelay
-;		Delay50xNms	delayReg, OpDelay			; Delay
-;       PullSol     GripSol, GripSolDelay
-;		Delay50xNms	delayReg, OpDelay			; Delay
-;        call        TurnGripCW
-;		Delay50xNms	delayReg, OpDelay			; Delay
-;        call        RePhotoData                ; Retake PhotoData once before turning off
-;TURN_OFF_FL
-
-;        ReleaseSol  GripSol, GripSolDelay
-;        Delay50xNms delayReg, OpDelay
-;        PullSol     GripSol, GripSolDelay
-;        Delay50xNms delayReg, OpDelay
-
+        ; Check if FL was '3 FAIL' and try to turn FL on again if that was the case
+        movlw       b'00001000'
+        cpfsgt      PhotoInput
+        goto        ON_AGAIN                    ; Skip if any LED was on
+        goto        TURN_OFF_FL
+ON_AGAIN
+        ;ReleaseSol  GripSol, GripSolDelay
+        bcf         LATD, GripSol
+        Delay50xNms delayReg, OpDelay
+        ;ReleaseSol  ArmSol, ArmSolDelay
+        bcf         LATD, ArmSol
+		Delay50xNms	delayReg, OpDelay			; Delay
+        call        TurnGripCCW
+		Delay50xNms	delayReg, OpDelay			; Delay
+        bsf         LATD, ArmSol
+		Delay50xNms	delayReg, OpDelay			; Delay
+        bsf         LATD, GripSol
+		Delay50xNms	delayReg, OpDelay			; Delay
+        call        TurnGripCW
+		Delay50xNms	delayReg, OpDelay			; Delay
+        call        RePhotoData                ; Retake PhotoData once before turning off
+TURN_OFF_FL
         call        TurnGripCCW                  ; Turn grip CCW
 		Delay50xNms	delayReg, OpDelay			 ; Delay
-        ReleaseSol  GripSol, GripSolDelay
-		Delay50xNms	delayReg, OpDelay   		 ; Delay
-        ReleaseSol  ArmSol, ArmSolDelay
+        ;ReleaseSol  GripSol, GripSolDelay
+        bcf         LATD, GripSol
+        Delay50xNms delayReg, OpDelay
+        ;ReleaseSol  ArmSol, ArmSolDelay
+        bcf         LATD, ArmSol
 		Delay50xNms	delayReg, OpDelay
-;        clrf        Counter
-;OFF_AGAIN
-;        ; CHECK IF FL IS OFF, or tried to turn off 2 more times already
-;        movlw       d'2'
-;        cpfslt      Counter
-;        goto        FL_IS_OFF                   ; Skip if Counter is 2
-;        btfsc       Photo3
-;        goto        FL_IS_OFF
-;        btfsc       Photo2
-;        goto        FL_IS_OFF
-;        btfsc       Photo1
-;        goto        FL_IS_OFF
-;        ; IF NOT TRY TURNING OFF AGAIN
-;        call        TurnGripCW
-;        Delay50xNms delayReg, OpDelay
-;        PullSol     ArmSol, ArmSolDelay
-;        Delay50xNms delayReg, OpDelay
-;        PullSol     GripSol, GripSolDelay
-;        Delay50xNms delayReg, OpDelay
-;        call        TurnGripCCW
-;        Delay50xNms delayReg, OpDelay
-;        ReleaseSol  GripSol, GripSolDelay
-;        Delay50xNms delayReg, OpDelay
-;        ReleaseSol  ArmSol, ArmSolDelay
-;        Delay50xNms delayReg, OpDelay
-;        incf        Counter
-;        goto        OFF_AGAIN
-;FL_IS_OFF
-;        clrf        Counter
+        clrf        RepeatCount
+OFF_AGAIN
+        ; CHECK IF FL IS OFF, or tried to turn off 2 more times already
+        movlw       d'2'
+        cpfslt      RepeatCount
+        goto        FL_IS_OFF                   ; Skip if Counter is less than 2
+        movff       PORTC, Temp
+        movlw       b'00001111'
+        andwf       Temp
+        movlw       b'00001000'
+        cpfsgt      Temp
+        goto        FL_IS_OFF
+        ; IF NOT TRY TURNING OFF AGAIN
+        call        TurnGripCW
+        Delay50xNms delayReg, OpDelay
+        bsf         LATD, ArmSol
+		Delay50xNms	delayReg, OpDelay			; Delay
+        bsf         LATD, GripSol
+        Delay50xNms delayReg, OpDelay
+        call        TurnGripCCW
+        Delay50xNms delayReg, OpDelay
+        ;ReleaseSol  GripSol, GripSolDelay
+        bcf         LATD, GripSol
+        Delay50xNms delayReg, OpDelay
+        ;ReleaseSol  ArmSol, ArmSolDelay
+        bcf         LATD, ArmSol
+        Delay50xNms delayReg, OpDelay
+        incf        RepeatCount
+        goto        OFF_AGAIN
+FL_IS_OFF
+        clrf        Counter
         ; CHECK EXIT CONDITIONS
         movlw       9                           ; Don't exit if under 9 count
         cpfslt      FL_count					; Skip if less than 9 FL counted
@@ -814,8 +816,7 @@ NO_MORE_FL
 		goto		NO_MORE_FL
 
 EXIT_OP
-		;Stop Timer
-		bcf			T0CON, TMR0ON
+		;Write Op Time
 		WriteEEPROM	Op_Seconds,	EEPROM_H, EEPROM_L
 		incf		EEPROM_L
 		WriteEEPROM	Op_Interrupts, EEPROM_H, EEPROM_L
@@ -867,6 +868,14 @@ ShiftLoop
 		cpfseq		Counter2					; Skip if 9 shifts were made
 		goto		ShiftLoop
 	; Finish Saving Data
+		;Stop Timer and goto OpLog
+		bcf			T0CON, TMR0ON
+		movlw		d'9'
+		movwf		EEPROM_L
+		WriteEEPROM	Op_Seconds,	EEPROM_H, EEPROM_L
+		incf		EEPROM_L
+		WriteEEPROM	Op_Interrupts, EEPROM_H, EEPROM_L
+		incf		EEPROM_L
 		goto		OpLog
 		
 ; OPERATION LOG STATE
@@ -1156,7 +1165,7 @@ DispOpRTC_Helper
 ; DATA SUBROUTINES
 PhotoData                                           ; CALLED FROM FOUND_FL
         movff       PORTC, PhotoInput               ; Take input from photo sensors
-        bsf         PhotoInput, 3                   ; Set 1 for break beam since FL was found           ; FIX RC3 for this
+        bsf         PhotoInput, 3                   ; Set 1 for break beam since FL was found
         movlw       b'00001111'
         andwf       PhotoInput
         WriteEEPROM PhotoInput, EEPROM_H, EEPROM_L
@@ -1282,6 +1291,13 @@ TurnGripCW_START
         movlf       GripMotorOn, Counter
 TurnGripCW_ON
 		bsf			GripMotorCW
+        ; End early if lights are detected
+        movff       PORTC, Temp
+        movlw       b'00000111'
+        andwf       Temp
+        movlw       b'00000000'
+        cpfseq      Temp
+        goto        END_TurnGripCW              ; END if PORTC[0:2] has any 1's
 		call        Delay200us
         decfsz      Counter
         goto        TurnGripCW_ON
@@ -1293,6 +1309,7 @@ TurnGripCW_OFF
         goto        TurnGripCW_OFF
         goto        TurnGripCW_START
 END_TurnGripCW
+        bcf         GripMotorCW
         return
 
 TurnGripCCW
@@ -1303,6 +1320,13 @@ TurnGripCCW_START
         movlf       GripMotorOn, Counter
 TurnGripCCW_ON
 		bsf			GripMotorCCW
+        ; End early if lights are detected to be off
+        movff       PORTC, Temp
+        movlw       b'00000111'
+        andwf       Temp
+        movlw       b'00000000'
+        cpfsgt      Temp
+        goto        END_TurnGripCCW              ; END if PORTC[0:2] has all 0's
 		call        Delay200us
         decfsz      Counter
         goto        TurnGripCCW_ON
@@ -1314,6 +1338,7 @@ TurnGripCCW_OFF
         goto        TurnGripCCW_OFF
         goto        TurnGripCCW_START
 END_TurnGripCCW
+        bcf         GripMotorCCW
         return
 
 ReleaseArmSol
