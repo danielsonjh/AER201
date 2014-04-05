@@ -51,9 +51,9 @@
 #define		OpDelay				d'10'
 #define     TrayStep            d'42'           ; 19.9 degrees = 24 * 0.83077
 #define     MaxTrayStep         d'70'           ; 49.8 degrees
-#define		GripMotorDelay		d'220'          ; GripMotorDelay X (ON + OFF)/5 ms
-#define     GripMotorOn         d'7'
-#define     GripMotorOff        d'3'
+#define		GripMotorDelay		d'200'          ; GripMotorDelay X (ON + OFF)/5 ms
+#define     GripMotorOn         d'8'
+#define     GripMotorOff        d'2'
 #define     SolDelay            d'120'
 #define     ArmSolDelay         d'50'          ; Max Duty Cycle = (N - 1) / N
 #define     GripSolDelay        d'30'          ; Min Duty Cycle = 1 / N
@@ -857,28 +857,6 @@ ShiftLoop
 		movlw		d'21'
 		cpfseq		Counter
 		goto		ShiftLoop
-	; Move a run (21 bytes) to TempEEPROM
-;SaveTempLoop
-;		ReadEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
-;		WriteEEPROM	EEPROM_REG, TempEEPROM_H, TempEEPROM_L
-;		incf		EEPROM_L
-;		incf		TempEEPROM_L
-;		incf		Counter
-;		movlw		d'21'
-;		cpfseq		Counter						; Keep looping until all 21 bytes are moved to Temp
-;		goto		SaveTempLoop
-;	; Move TempEEPROM to the next 21 byte block in EEPROM run data
-;		movlf		TempEEPROM_L_Const, TempEEPROM_L
-;		clrf		Counter
-;TempShiftLoop
-;		ReadEEPROM	EEPROM_REG, TempEEPROM_H, TempEEPROM_L
-;		WriteEEPROM	EEPROM_REG, EEPROM_H, EEPROM_L
-;		incf		EEPROM_L
-;		incf		TempEEPROM_L
-;		incf		Counter
-;		movlw		d'21'
-;		cpfseq		Counter
-;		goto		TempShiftLoop
 	; Set EEPROM address to the previous 21 byte block, and reset TempEEPROM address
 		movlw		d'42'
 		subwf		EEPROM_L
