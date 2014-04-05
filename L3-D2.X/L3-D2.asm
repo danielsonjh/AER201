@@ -100,6 +100,7 @@ stepDelay2			equ     0x63
 FL_count			equ     0x64
 PhotoInput			equ     0x65
 RepeatCount         equ     0x66
+TryingAgain         equ     0x67
 
 EEPROM_CLEAR		equ		0x79
 EEPROM_H			equ		0x80
@@ -717,12 +718,14 @@ FIND_FL
 FOUND_FL
         clrf        TrayEncoder                 ; Reset tray encoder since FL was found
         incf		FL_count
+
         ; TURN ON LED
         Delay50xNms delayReg, OpDelay
         bsf         LATD, ArmSol
 		Delay50xNms	delayReg, OpDelay			; Delay
         bsf         LATD, GripSol
 		Delay50xNms	delayReg, OpDelay			; Delay
+        clrf        TryingAgain
         call        TurnGripCW                  ; Turn grip CW
         ; TAKE DATA FROM PHOTO SENSORS
         call        PhotoData
@@ -734,28 +737,27 @@ FOUND_FL
         goto        ON_AGAIN                    ; Skip if any LED was on
         goto        TURN_OFF_FL
 ON_AGAIN
-        ;ReleaseSol  GripSol, GripSolDelay
         bcf         LATD, GripSol
         Delay50xNms delayReg, OpDelay
-        ;ReleaseSol  ArmSol, ArmSolDelay
         bcf         LATD, ArmSol
 		Delay50xNms	delayReg, OpDelay			; Delay
+        setf        TryingAgain
         call        TurnGripCCW
 		Delay50xNms	delayReg, OpDelay			; Delay
         bsf         LATD, ArmSol
 		Delay50xNms	delayReg, OpDelay			; Delay
         bsf         LATD, GripSol
 		Delay50xNms	delayReg, OpDelay			; Delay
+        clrf        TryingAgain
         call        TurnGripCW
 		Delay50xNms	delayReg, OpDelay			; Delay
         call        RePhotoData                ; Retake PhotoData once before turning off
 TURN_OFF_FL
+        setf        TryingAgain
         call        TurnGripCCW                  ; Turn grip CCW
 		Delay50xNms	delayReg, OpDelay			 ; Delay
-        ;ReleaseSol  GripSol, GripSolDelay
         bcf         LATD, GripSol
         Delay50xNms delayReg, OpDelay
-        ;ReleaseSol  ArmSol, ArmSolDelay
         bcf         LATD, ArmSol
 		Delay50xNms	delayReg, OpDelay
         clrf        RepeatCount
@@ -771,18 +773,18 @@ OFF_AGAIN
         cpfsgt      Temp
         goto        FL_IS_OFF
         ; IF NOT TRY TURNING OFF AGAIN
+        setf        TryingAgain
         call        TurnGripCW
         Delay50xNms delayReg, OpDelay
         bsf         LATD, ArmSol
 		Delay50xNms	delayReg, OpDelay			; Delay
         bsf         LATD, GripSol
         Delay50xNms delayReg, OpDelay
+        setf        TryingAgain
         call        TurnGripCCW
         Delay50xNms delayReg, OpDelay
-        ;ReleaseSol  GripSol, GripSolDelay
         bcf         LATD, GripSol
         Delay50xNms delayReg, OpDelay
-        ;ReleaseSol  ArmSol, ArmSolDelay
         bcf         LATD, ArmSol
         Delay50xNms delayReg, OpDelay
         incf        RepeatCount
@@ -1291,6 +1293,9 @@ TurnGripCW_START
         movlf       GripMotorOn, Counter
 TurnGripCW_ON
 		bsf			GripMotorCW
+        movlw       0x00
+        cpfseq      TryingAgain
+        goto        SkipEarlyAbortCW
         ; End early if lights are detected
         movff       PORTC, Temp
         movlw       b'00000111'
@@ -1298,6 +1303,7 @@ TurnGripCW_ON
         movlw       b'00000000'
         cpfseq      Temp
         goto        END_TurnGripCW              ; END if PORTC[0:2] has any 1's
+SkipEarlyAbortCW
 		call        Delay200us
         decfsz      Counter
         goto        TurnGripCW_ON
@@ -1320,6 +1326,9 @@ TurnGripCCW_START
         movlf       GripMotorOn, Counter
 TurnGripCCW_ON
 		bsf			GripMotorCCW
+        movlw       0x00
+        cpfseq      TryingAgain
+        goto        SkipEarlyAbortCCW
         ; End early if lights are detected to be off
         movff       PORTC, Temp
         movlw       b'00000111'
@@ -1327,6 +1336,7 @@ TurnGripCCW_ON
         movlw       b'00000000'
         cpfsgt      Temp
         goto        END_TurnGripCCW              ; END if PORTC[0:2] has all 0's
+SkipEarlyAbortCCW
 		call        Delay200us
         decfsz      Counter
         goto        TurnGripCCW_ON
