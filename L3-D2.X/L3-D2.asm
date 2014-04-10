@@ -46,14 +46,14 @@
 #define		TempEEPROM_L_Const	d'220'
 #define		LastPermLog			d'168'
 ; Stepper Controls
-#define     StepDelayVal        0x1D
+#define     StepDelayVal        0x1A
 ; Operation Controls
-#define		OpDelay				d'7'
+#define		OpDelay				d'1'
 #define     TrayStep            d'42'           ; 19.9 degrees = 24 * 0.83077
 #define     MaxTrayStep         d'70'           ; 49.8 degrees
-#define		GripMotorDelay		d'200'          ; GripMotorDelay X (ON + OFF)/5 ms
-#define     GripMotorOn         d'8'
-#define     GripMotorOff        d'2'
+#define		GripMotorDelay		d'80'          ; GripMotorDelay X (ON + OFF)/5 ms
+#define     GripMotorOn         d'19'
+#define     GripMotorOff        d'1'
 #define     SolDelay            d'120'
 #define     ArmSolDelay         d'50'          ; Max Duty Cycle = (N - 1) / N
 #define     GripSolDelay        d'1'          ; Min Duty Cycle = 1 / N
@@ -731,27 +731,28 @@ FOUND_FL
         call        PhotoData
 		Delay50xNms	delayReg, OpDelay			; Delay
 
-        ; Check if FL was '3 FAIL' and try to turn FL on again if that was the case
-        movlw       b'00001000'
-        cpfsgt      PhotoInput
-        goto        ON_AGAIN                    ; Skip if any LED was on
-        goto        TURN_OFF_FL
-ON_AGAIN
-        bcf         LATD, GripSol
-        Delay50xNms delayReg, OpDelay
-        bcf         LATD, ArmSol
-		Delay50xNms	delayReg, OpDelay			; Delay
-        setf        TryingAgain
-        call        TurnGripCCW
-		Delay50xNms	delayReg, OpDelay			; Delay
-        bsf         LATD, ArmSol
-		Delay50xNms	delayReg, OpDelay			; Delay
-        bsf         LATD, GripSol
-		Delay50xNms	delayReg, OpDelay			; Delay
-        clrf        TryingAgain
-        call        TurnGripCW
-		Delay50xNms	delayReg, OpDelay			; Delay
-        call        RePhotoData                ; Retake PhotoData once before turning off
+;        ; Check if FL was '3 FAIL' and try to turn FL on again if that was the case
+;        movlw       b'00001000'
+;        cpfsgt      PhotoInput
+;        goto        ON_AGAIN                    ; Skip if any LED was on
+;        goto        TURN_OFF_FL
+;ON_AGAIN
+;        bcf         LATD, GripSol
+;        Delay50xNms delayReg, OpDelay
+;        bcf         LATD, ArmSol
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        setf        TryingAgain
+;        call        TurnGripCCW
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        bsf         LATD, ArmSol
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        bsf         LATD, GripSol
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        clrf        TryingAgain
+;        call        TurnGripCW
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        call        RePhotoData                ; Retake PhotoData once before turning off
+
 TURN_OFF_FL
         setf        TryingAgain
         call        TurnGripCCW                  ; Turn grip CCW
@@ -760,35 +761,35 @@ TURN_OFF_FL
         Delay50xNms delayReg, OpDelay
         bcf         LATD, ArmSol
 		Delay50xNms	delayReg, OpDelay
-        clrf        RepeatCount
-OFF_AGAIN
-        ; CHECK IF FL IS OFF, or tried to turn off 2 more times already
-        movlw       d'2'
-        cpfslt      RepeatCount
-        goto        FL_IS_OFF                   ; Skip if Counter is less than 2
-        movff       PORTC, Temp
-        movlw       b'00001111'
-        andwf       Temp
-        movlw       b'00001000'
-        cpfsgt      Temp
-        goto        FL_IS_OFF
-        ; IF NOT TRY TURNING OFF AGAIN
-        setf        TryingAgain
-        call        TurnGripCW
-        Delay50xNms delayReg, OpDelay
-        bsf         LATD, ArmSol
-		Delay50xNms	delayReg, OpDelay			; Delay
-        bsf         LATD, GripSol
-        Delay50xNms delayReg, OpDelay
-        setf        TryingAgain
-        call        TurnGripCCW
-        Delay50xNms delayReg, OpDelay
-        bcf         LATD, GripSol
-        Delay50xNms delayReg, OpDelay
-        bcf         LATD, ArmSol
-        Delay50xNms delayReg, OpDelay
-        incf        RepeatCount
-        goto        OFF_AGAIN
+;        clrf        RepeatCount
+;OFF_AGAIN
+;        ; CHECK IF FL IS OFF, or tried to turn off 2 more times already
+;        movlw       d'2'
+;        cpfslt      RepeatCount
+;        goto        FL_IS_OFF                   ; Skip if Counter is less than 2
+;        movff       PORTC, Temp
+;        movlw       b'00001111'
+;        andwf       Temp
+;        movlw       b'00001000'
+;        cpfsgt      Temp
+;        goto        FL_IS_OFF
+;        ; IF NOT TRY TURNING OFF AGAIN
+;        setf        TryingAgain
+;        call        TurnGripCW
+;        Delay50xNms delayReg, OpDelay
+;        bsf         LATD, ArmSol
+;		Delay50xNms	delayReg, OpDelay			; Delay
+;        bsf         LATD, GripSol
+;        Delay50xNms delayReg, OpDelay
+;        setf        TryingAgain
+;        call        TurnGripCCW
+;        Delay50xNms delayReg, OpDelay
+;        bcf         LATD, GripSol
+;        Delay50xNms delayReg, OpDelay
+;        bcf         LATD, ArmSol
+;        Delay50xNms delayReg, OpDelay
+;        incf        RepeatCount
+;        goto        OFF_AGAIN
 FL_IS_OFF
         clrf        Counter
         ; CHECK EXIT CONDITIONS
